@@ -73,3 +73,44 @@ void run_dosi(int n, const float *p, float lc, float q, double *laeq, double *do
     *laeq = dose_laeq(ds.e_ear, ds.seconds);
     *dose_pct = ds.dose_pct;
 }
+
+/* seal monitor on one ear's x_c / d_hat (the right ear gets the same signals).
+ * Per second: il_out[s*4+b], drop_out[s], avg_out[s], flag_out[s], valid_out[s]. */
+int run_seal(int n, const float *xc, const float *dh, const float *base,
+             float *il_out, float *drop_out, float *avg_out, int *flag_out, int *valid_out)
+{
+    static seal_rt_t rt;
+    seal_t m;
+    seal_rt_init(&rt);
+    seal_init(&m, base);
+    int sec = 0;
+    for (int i = 0; i < n; i++) {
+        const float x2[2] = { xc[i], xc[i] }, d2[2] = { dh[i], dh[i] };
+        seal_rt_sample(&rt, x2, d2);
+        if (rt.ready) {
+            rt.ready = false;
+            valid_out[sec] = seal_add_second(&m, rt.sec_ms[0][0], rt.sec_ms[0][1]);
+            for (unsigned b = 0; b < SEAL_MAX_BANDS; b++) il_out[sec * (int)SEAL_MAX_BANDS + (int)b] = m.il[b];
+            drop_out[sec] = m.drop;
+            avg_out[sec] = m.avg;
+            flag_out[sec] = m.flag;
+            sec++;
+        }
+    }
+    return sec;
+}
+
+/* factory baseline learning over every complete second of xc / dh */
+int run_seal_learn(int n, const float *xc, const float *dh, float *base_out)
+{
+    static seal_rt_t rt;
+    seal_learn_t l;
+    memset(&l, 0, sizeof l);
+    seal_rt_init(&rt);
+    for (int i = 0; i < n; i++) {
+        const float x2[2] = { xc[i], xc[i] }, d2[2] = { dh[i], dh[i] };
+        seal_rt_sample(&rt, x2, d2);
+        if (rt.ready) { rt.ready = false; seal_learn_add(&l, rt.sec_ms[0][0], rt.sec_ms[0][1]); }
+    }
+    return seal_learn_result(&l, base_out) ? (int)l.n : 0;
+}

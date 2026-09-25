@@ -147,3 +147,80 @@ float DSP_FAST hearthru_run(hearthru_t *h, float ref_pa)
     else if (v < -h->limit_pk) v = -h->limit_pk;
     return v;
 }
+
+/* ------------------------------------------------------------------ seal monitor */
+_Static_assert(SEAL_NB == SEAL_MAX_BANDS, "seal band count: regenerate dsp_coeffs.h or change SEAL_MAX_BANDS");
+_Static_assert(SOS_SEALBAND_N == 2u * SEAL_NB, "seal monitor uses two sections per band");
+
+void seal_rt_init(seal_rt_t *s) { memset(s, 0, sizeof *s); }
+
+void DSP_FAST seal_rt_sample(seal_rt_t *s, const float xc[2], const float dh[2])
+{
+    for (int e = 0; e < 2; e++) {
+        const float in[2] = { xc[e], dh[e] };
+        for (int c = 0; c < 2; c++) {
+            for (unsigned b = 0; b < SEAL_NB; b++) {
+                float v = biquad_run(SOS_SEALBAND[2u * b], &s->bq[e][c][b][0], in[c]);
+                v = biquad_run(SOS_SEALBAND[2u * b + 1u], &s->bq[e][c][b][1], v);
+                s->acc[e][c][b] += v * v;
+            }
+        }
+    }
+    if (++s->n >= ANC_FS_HZ) {
+        for (int e = 0; e < 2; e++)
+            for (int c = 0; c < 2; c++)
+                for (unsigned b = 0; b < SEAL_NB; b++) {
+                    s->sec_ms[e][c][b] = s->acc[e][c][b] * (1.0f / (float)ANC_FS_HZ);
+                    s->acc[e][c][b] = 0.0f;
+                }
+        s->n = 0u;
+        s->ready = true;
+    }
+}
+
+void seal_init(seal_t *m, const float base[SEAL_MAX_BANDS])
+{
+    memset(m, 0, sizeof *m);
+    memcpy(m->base, base, sizeof m->base);
+}
+
+bool seal_add_second(seal_t *m, const float ms_x[SEAL_MAX_BANDS], const float ms_d[SEAL_MAX_BANDS])
+{
+    float lx[SEAL_MAX_BANDS], lmax = -1e9f;
+    for (unsigned b = 0; b < SEAL_NB; b++) {
+        lx[b] = dose_pa2_to_db(ms_x[b]);
+        m->il[b] = lx[b] - dose_pa2_to_db(ms_d[b]);
+        if (lx[b] > lmax) lmax = lx[b];
+    }
+    float sum = 0.0f;
+    unsigned na = 0;
+    for (unsigned b = 0; b < SEAL_NB; b++) {
+        if (lx[b] >= lmax - SEAL_GATE_DB && lx[b] >= SEAL_MIN_BAND_DB) {
+            sum += m->base[b] - m->il[b];
+            na++;
+        }
+    }
+    m->valid = (na > 0u);
+    if (!m->valid) return false;
+    m->drop = sum / (float)na;
+    m->avg = (m->n_valid == 0u) ? m->drop : m->avg + (m->drop - m->avg) * (1.0f / SEAL_AVG_S);
+    m->n_valid++;
+    m->run = (m->avg >= SEAL_FLAG_DB) ? m->run + 1u : 0u;
+    if (m->run >= SEAL_HOLD_S) m->flag = true;
+    else if (m->avg < SEAL_FLAG_DB - SEAL_HYST_DB) m->flag = false;
+    return true;
+}
+
+void seal_learn_add(seal_learn_t *l, const float ms_x[SEAL_MAX_BANDS], const float ms_d[SEAL_MAX_BANDS])
+{
+    for (unsigned b = 0; b < SEAL_NB; b++) { l->ax[b] += (double)ms_x[b]; l->ad[b] += (double)ms_d[b]; }
+    l->n++;
+}
+
+bool seal_learn_result(const seal_learn_t *l, float base[SEAL_MAX_BANDS])
+{
+    if (l->n == 0u) return false;
+    for (unsigned b = 0; b < SEAL_NB; b++)
+        base[b] = dose_pa2_to_db((float)(l->ax[b] / l->n)) - dose_pa2_to_db((float)(l->ad[b] / l->n));
+    return true;
+}

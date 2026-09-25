@@ -12,12 +12,12 @@ programs assume the label rating. The ANC hardware already has an outside
 
 so, every second, with no extra sensor or test signal:
 
-    passive attenuation  IL_A  = L_A(x_c) - L_A(d_hat)   -> seal quality, noise-specific
-    total protection     PAR_A = L_A(x_c) - L_A(e)       -> what the wearer actually gets
+    per-octave-band attenuation  IL_b = L_b(x_c) - L_b(d_hat)  -> seal quality (noise-independent)
+    total protection     PAR_A = L_A(x_c) - L_A(e)              -> what the wearer actually gets
     verified exposure          = L_A(e) (+ the mic's cup-to-eardrum offset)
 
-and the seal is flagged when IL_A falls a set margin below the value learned
-at fitting. This study checks that the estimates track the truth in the plant
+and the seal is flagged when the band attenuation falls a set margin below
+ONE factory baseline (seal_ref.py: the same decision logic as the firmware). This study checks that the estimates track the truth in the plant
 model, across synthetic and real recorded noise, and shows how wrong a
 label-based dose estimate becomes with a leak.
 
@@ -39,6 +39,7 @@ from plant import Plant, PlantConfig, FS  # noqa: E402
 from noise import industrial, scale_to_dba, spl_a  # noqa: E402
 from anc_ref import run_anc  # noqa: E402
 from run_all import TUNED, AMBIENT_DBA, factory_cal, RES  # noqa: E402
+import seal_ref  # noqa: E402
 
 import matplotlib  # noqa: E402
 matplotlib.use("Agg")
@@ -47,7 +48,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 # seal conditions: passive insertion-loss scale (1.0 = factory fit)
 SEALS = [(1.0, "good seal"), (0.85, "thin glasses temple"), (0.7, "thick glasses temple"),
          (0.55, "poor fit / hair")]
-FLAG_DB = 3.0          # flag when passive attenuation drops this far below the fitted baseline
+FLAG_DB = seal_ref.FLAG_DB   # flag when band attenuation drops this far below the factory baseline
 WIN = FS               # 1 s estimation window
 SECONDS = 16
 
@@ -81,10 +82,11 @@ def run_case(seal, out, s_hat, f_hat):
     x_c = x_meas - signal.lfilter(past_only(f_hat), 1, y)
     d_hat = e - signal.lfilter(past_only(s_hat), 1, y)
     lx, ld, le = a_level_blocks(x_c), a_level_blocks(d_hat), a_level_blocks(e)
+    bx, bd = seal_ref.band_ms_per_second(x_c), seal_ref.band_ms_per_second(d_hat)
     # ground truth from the plant: passive IL on this noise, total protection
     true_il = a_level_blocks(xr) - a_level_blocks(d)
     skip = 4                                   # let the ANC converge
-    return dict(seal=seal, trips=int(trips),
+    return dict(seal=seal, trips=int(trips), band_x=bx, band_d=bd,
                 il_est=lx - ld, il_true=true_il, par_est=lx - le,
                 at_ear=le, passive_ear=a_level_blocks(d),
                 il_est_mean=float(np.mean((lx - ld)[skip:])), il_true_mean=float(np.mean(true_il[skip:])),
@@ -111,26 +113,33 @@ def main():
     s_hat, f_hat = factory_cal(Plant())
     sets = noise_set(n, a.dir)
 
+    runs = {(name, seal): run_case(seal, out, s_hat, f_hat) for name, out in sets for seal, _ in SEALS}
+    # ONE factory baseline: good seal, pink noise, energy mean after convergence
+    ref = runs[("pink", 1.0)]
+    base = seal_ref.learn_baseline(ref["band_x"][4:], ref["band_d"][4:])
     rows = []
-    for name, out in sets:
-        base = None
+    for name, _ in sets:
         for seal, label in SEALS:
-            r = run_case(seal, out, s_hat, f_hat)
-            if seal == 1.0:
-                base = r["il_est_mean"]
-            drop = base - r["il_est_mean"]
-            r.update(noise=name, label=label, drop=drop, flagged=bool(drop >= FLAG_DB),
-                     est_err=r["il_est_mean"] - r["il_true_mean"])
+            r = runs[(name, seal)]
+            mon = seal_ref.SealMonitor(base)
+            t_flag = None
+            for k in range(len(r["band_x"])):
+                mon.add_second(r["band_x"][k], r["band_d"][k])
+                if mon.flag and t_flag is None:
+                    t_flag = k + 1
+            true_drop = runs[(name, 1.0)]["il_true_mean"] - r["il_true_mean"]
+            r.update(noise=name, label=label, drop=mon.avg, flagged=bool(mon.flag), t_flag=t_flag,
+                     true_drop=true_drop, est_err=r["il_est_mean"] - r["il_true_mean"])
             rows.append(r)
             print(f"{name:16s} {label:22s} IL true {r['il_true_mean']:5.1f}  est {r['il_est_mean']:5.1f}  "
-                  f"drop {drop:4.1f}  flag {r['flagged']!s:5s}  at ear {r['at_ear_mean']:5.1f} dB(A)  "
-                  f"PAR {r['par_mean']:5.1f}  trips {r['trips']}", flush=True)
+                  f"band drop {mon.avg:4.1f} (true {true_drop:4.1f})  flag {r['flagged']!s:5s} "
+                  f"t {t_flag}  at ear {r['at_ear_mean']:5.1f}  trips {r['trips']}", flush=True)
 
     # ---- summary numbers ----
     errs = np.array([r["est_err"] for r in rows])
     leaks = [r for r in rows if r["seal"] < 1.0]
-    real_leaks = [r for r in leaks if r["il_true_mean"] <= [q for q in rows if q["noise"] == r["noise"]
-                                                            and q["seal"] == 1.0][0]["il_true_mean"] - FLAG_DB]
+    real_leaks = [r for r in leaks if r["true_drop"] >= FLAG_DB]
+    t_flags = [r["t_flag"] for r in real_leaks if r["t_flag"]]
     tp = sum(r["flagged"] for r in real_leaks)
     fp = sum(r["flagged"] for r in rows if r["seal"] == 1.0)
     # a fit test at the start of the shift certifies the good-seal level; a leak later in the
@@ -177,6 +186,7 @@ def main():
     summ = dict(ambient_dba=AMBIENT_DBA, flag_db=FLAG_DB, window_s=WIN / FS,
                 est_error_mean_db=float(np.mean(errs)), est_error_max_abs_db=float(np.max(np.abs(errs))),
                 leaks_detected=f"{tp}/{len(real_leaks)}", false_alarms=f"{fp}/{len(sets)}",
+                baseline_db=[float(v) for v in base], time_to_flag_s=[min(t_flags), max(t_flags)],
                 dose_x_thick_temple=[min(r["dose_x"] for r in thick), max(r["dose_x"] for r in thick)],
                 dose_x_poor_fit=[min(r["dose_x"] for r in poor), max(r["dose_x"] for r in poor)],
                 cases=[{k: (float(v) if isinstance(v, (np.floating, float)) else v) for k, v in r.items()
@@ -190,12 +200,15 @@ def main():
          "(3 synthetic + real ESC-50 recordings). The leak also raises the driver's low-frequency leak corner "
          "(35 Hz / seal^2: " + ", ".join(f"{35 / s ** 2:.0f}" for s, _ in SEALS) + " Hz), so the factory "
          "secondary-path model is wrong under a leak, as it would be on a real head. Estimates use only signals the firmware already has "
-         f"(outside mic, error mic, controller output, factory S_hat/F_hat), {WIN // FS} s windows, "
-         "averaged after the ANC converges.", "",
+         f"(outside mic, error mic, controller output, factory S_hat/F_hat), {WIN // FS} s windows. "
+         "Detection uses the firmware's logic (`seal_ref.py`): octave bands 250 Hz-2 kHz against **one** "
+         "factory baseline measured once (good seal, pink noise: "
+         + ", ".join(f"{b:.0f} Hz {v:.1f} dB" for b, v in zip(seal_ref.BANDS, base)) + "), used for every noise.", "",
          f"- **Passive-attenuation estimate error:** mean {np.mean(errs):+.2f} dB, worst {np.max(np.abs(errs)):.2f} dB "
          "(estimate vs. the plant's true attenuation on the same noise).",
-         f"- **Leak detection** (drop >= {FLAG_DB:.0f} dB vs. the fitted baseline): {tp} of {len(real_leaks)} real "
-         f"leaks flagged, {fp} false alarms on {len(sets)} good-seal runs.",
+         f"- **Leak detection** (band attenuation {FLAG_DB:.0f} dB below the factory baseline): {tp} of "
+         f"{len(real_leaks)} leaks that really cost >= {FLAG_DB:.0f} dB flagged, {fp} false alarms on "
+         f"{len(sets)} good-seal runs, flagged {min(t_flags)}-{max(t_flags)} s after switch-on.",
          "- **What a one-time fit test misses:** it certifies the good-seal level. A thick glasses temple "
          f"later in the shift raises the real dose {min(r['dose_x'] for r in thick):.1f}-"
          f"{max(r['dose_x'] for r in thick):.1f}x, a poor fit {min(r['dose_x'] for r in poor):.1f}-"
@@ -207,11 +220,11 @@ def main():
          "the driver's own low-frequency pressure leaks out too. Re-identifying the secondary path on the head "
          "was tested and does not restore it on tonal noise. The only fix is the wearer reseating the cup, "
          "so the product's response to a flag is an alert (tone + LED + log), not silent compensation.", "",
-         "| Noise | Seal | True passive IL | Estimated IL | Drop vs fit | Flagged | At ear, ANC on | ANC adds | Measured PAR | Dose vs fit |",
-         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+         "| Noise | Seal | True passive IL (A) | Estimated IL (A) | True loss | Band drop vs factory | Flagged (s) | At ear, ANC on | ANC adds | Measured PAR | Dose vs fit |",
+         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for r in rows:
         L.append(f"| {r['noise']} | {r['label']} | {r['il_true_mean']:.1f} | {r['il_est_mean']:.1f} | "
-                 f"{r['drop']:.1f} | {'yes' if r['flagged'] else 'no'} | {r['at_ear_mean']:.1f} | {r['anc_adds']:.1f} | {r['par_mean']:.1f} | {r['dose_x']:.1f}x |")
+                 f"{r['true_drop']:.1f} | {r['drop']:.1f} | {('yes (' + str(r['t_flag']) + ')') if r['flagged'] else 'no'} | {r['at_ear_mean']:.1f} | {r['anc_adds']:.1f} | {r['par_mean']:.1f} | {r['dose_x']:.1f}x |")
     L += ["", "Levels in dB(A). IL = passive attenuation on that noise (ANC contribution removed); "
           "PAR = total protection with ANC. The error mic sits in the cup, not at the eardrum: a fixed "
           "per-design offset has to be calibrated on a head-and-torso simulator before these become "

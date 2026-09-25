@@ -17,7 +17,7 @@ typedef struct {
     float    dose_amb_pct;   /* shift dose so far, unprotected */
     uint16_t vbat_mv;
     uint8_t  mode;
-    uint8_t  flags;          /* bit0 overload, bit1 watchdog trip, bit2 charging, bit3 shift start */
+    uint8_t  flags;          /* bit0 overload, bit1 watchdog trip, bit2 charging, bit3 shift start, bit4 seal leak */
     uint32_t crc;
 } store_rec_t;
 

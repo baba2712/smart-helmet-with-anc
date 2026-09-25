@@ -30,6 +30,10 @@ typedef struct {
     uint8_t boot_refine;           /* 2 s path check at power-on */
     uint8_t amp_gain;              /* TPA6132A2 G1:G0 */
     uint32_t serial;
+    /* --- v3: seal monitor (new fields go at the end: store.c migrates older blobs) --- */
+    float seal_base[2][SEAL_MAX_BANDS];   /* factory per-band passive attenuation, dB */
+    uint8_t seal_valid;                   /* 'seal learn' done */
+    uint8_t pad_[3];
 } app_cal_t;
 
 typedef struct {
@@ -50,6 +54,7 @@ extern anc_t       g_anc[2];
 extern sysid_t     g_id[2];
 extern dosi_rt_t   g_dosi;
 extern hearthru_t  g_ht[2];
+extern seal_rt_t   g_seal_rt;
 
 /* raw (unweighted) 1-second mean square of each mic, for calibration and status */
 typedef struct {

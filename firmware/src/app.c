@@ -21,6 +21,7 @@ anc_t       g_anc[2];
 sysid_t     g_id[2];
 dosi_rt_t   g_dosi;
 hearthru_t  g_ht[2];
+seal_rt_t   g_seal_rt;
 meter_t     g_meter;
 
 static float k_in[4];          /* ADC code -> Pa: ref L, err L, ref R, err R */
@@ -97,6 +98,7 @@ static void init_cores(void)
 
 void app_init(void)
 {
+    seal_rt_init(&g_seal_rt);
     compute_scales();
     init_cores();
     dosi_rt_init(&g_dosi);
@@ -203,6 +205,9 @@ __attribute__((section(".itcm"))) void app_audio_frame(const audio_in_t *in)
         g = (g < target) ? fminf(g + step, target) : fmaxf(g - step, target);
         g_app.out_gain = g;
 
+        /* seal monitor inputs: outside noise without the speaker's leakage, and the noise
+         * that came through the cup with the anti-noise removed (plain mics when idle) */
+        float sx[2] = { x[0], x[1] }, sd[2] = { e[0], e[1] };
         if (g > 0.0f) {
             float y[2], ht[2], u[2];
             for (int k = 0; k < 2; k++) {
@@ -214,10 +219,13 @@ __attribute__((section(".itcm"))) void app_audio_frame(const audio_in_t *in)
             for (int k = 0; k < 2; k++) {
                 anc_commit(&g_anc[k], u[k], ht[k]);
                 g_app.trips[k] = g_anc[k].st.trips;
+                sx[k] = g_anc[k].xc;
+                sd[k] = g_anc[k].dh;
             }
         } else {
             audio_dac_write((uint32_t)DAC_MID, (uint32_t)DAC_MID);
         }
+        seal_rt_sample(&g_seal_rt, sx, sd);
 
         /* safety: extreme sustained level at the ear (e.g. driver fault, feedback howl) -> passive */
         for (int k = 0; k < 2; k++) {

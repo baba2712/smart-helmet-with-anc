@@ -17,4 +17,24 @@ static const float SOS_HEARTHRU[2][5] = {
     {0.0976310729f, 0.195262146f, 0.0976310729f, -0.942809042f, 0.333333333f}
 };
 
+/* seal monitor (sim/seal_ref.py): band b uses sections 2b, 2b+1 */
+#define SEAL_NB 4u          /* octave bands 250, 500, 1000, 2000 Hz, 2 biquads each */
+#define SEAL_GATE_DB 15.0f
+#define SEAL_MIN_BAND_DB 55.0f
+#define SEAL_FLAG_DB 3.0f
+#define SEAL_HYST_DB 1.0f
+#define SEAL_AVG_S 4.0f
+#define SEAL_HOLD_S 3u
+#define SOS_SEALBAND_N 8u
+static const float SOS_SEALBAND[8][5] = {
+    {0.000293952943f, 0.000587905886f, 0.000293952943f, -1.96585152f, 0.969801708f},
+    {1.0f, -2.0f, 1.0f, -1.98031106f, 0.98174495f},
+    {0.00114799511f, 0.00229599022f, 0.00114799511f, -1.92498456f, 0.940538327f},
+    {1.0f, -2.0f, 1.0f, -1.95811771f, 0.963799653f},
+    {0.00438253315f, 0.00876506631f, 0.00438253315f, -1.82454988f, 0.884787187f},
+    {1.0f, -2.0f, 1.0f, -1.90643232f, 0.928727807f},
+    {0.0160432653f, 0.0320865306f, 0.0160432653f, -1.55893681f, 0.784143424f},
+    {1.0f, -2.0f, 1.0f, -1.77550827f, 0.861158845f}
+};
+
 #endif

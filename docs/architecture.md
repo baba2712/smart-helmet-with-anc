@@ -85,6 +85,7 @@ Tuned values live in one place, `sim/run_all.py::TUNED`. They are exported to
 | Mode changes | Always | 50 ms fades (no clicks) |
 | No calibration | `paths_valid == 0` | ANC refuses to run; passive + magenta LED |
 | Fit check failure at power-on | Model change > 6 dB or poor fit | Keeps the stored model; amber LED |
+| Seal leak (in use) | Per-band cup attenuation >= 3 dB below the factory baseline for 3 s | Amber LED, `seal_leak` in status/BLE, log flag bit 4 |
 | HardFault / watchdog reset | Any | DAC to mid-scale and amp muted *before* reset |
 | Low battery | < 3.2 V | Saves the log record and powers off |
 
@@ -101,6 +102,28 @@ In every failure the helmet falls back to a **passive earmuff**. That is the saf
   survives power cycles. The shift dose continues across power-offs until `dose reset`.
 * The firmware test checks it against the standard: 94.0 dB at 1 kHz reads
   93.99 dB(A), and 100 dB(A) gives exactly NIOSH's 15 min allowance.
+
+## Seal monitor (in-use protection check)
+
+A cushion leak (safety-glasses temple, hair, a tilted helmet) costs 3-12 dB of
+protection, and ANC cannot win it back: the driver's own low-frequency pressure
+leaks out too. So the helmet measures its seal continuously and tells the wearer.
+
+It needs no extra sensor or test signal. The ANC core already forms
+`x_c = x - F_hat*y` (outside noise without the speaker's leakage) and
+`d_hat = e - S_hat*y` (noise that came through the cup, ANC removed). Per ear,
+the ISR accumulates octave-band (250 Hz-2 kHz) mean squares of both; once a
+second the main loop computes the per-band attenuation `L(x_c) - L(d_hat)`.
+Per-band attenuation belongs to the cup and its seal, not to the noise, so one
+factory baseline (`seal learn`, reference head, broadband noise) holds for any
+noise. Bands within 15 dB of the loudest outside band and above 55 dB count;
+their mean shortfall vs the baseline, smoothed over ~4 s, raises the flag at
+3 dB (1 dB hysteresis).
+
+Simulation over 10 noises (3 synthetic, 7 real recordings) x 4 seal conditions:
+23/23 real leaks flagged in 3-5 s, 0 false alarms (`sim/results/seal_monitor.md`).
+C and Python agree to < 0.001 dB (`firmware/test/test_fil.py`). Reference:
+`sim/seal_ref.py`; firmware: `seal_*` in `dsp/dsp_misc.c`.
 
 ## Boards
 

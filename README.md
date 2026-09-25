@@ -26,14 +26,14 @@ On **70 real field recordings** (engine, chainsaw, hand saw, helicopter, train, 
 | `firmware/` | Bare-metal C for STM32H743: 32 kHz ADC→DSP→DAC path, FxLMS core, path identification, dosimeter, hear-through, USB CDC (TinyUSB), BLE UART, flash storage, power/UI. `test/` holds firmware-in-the-loop tests against the sim. |
 | `hardware/` | KiCad 7 projects (open fine in KiCad 8/9) for three boards, generated from `hardware/gen/` (Python circuit descriptions → schematic → PCB → Freerouting → fab files). `spice/` verifies the analog chain in ngspice. |
 | `mechanical/` | OpenSCAD earcup inserts, driver baffle, outside-mic pod, light pipe / button plunger. Parametric; **measure your earmuff** and edit `params.scad`. `check_fit.py` cross-checks the parts against the PCBs and the cup. |
-| `tools/` | `anc_tool.py`: host tool for the USB/BLE command link (status, tuning, calibration, dose log). |
-| `docs/` | Architecture notes. |
+| `tools/` | `anc_tool.py`: host tool for the USB/BLE command link (status, tuning, calibration, driver test, dose log). `acceptance_test.py`: the per-helmet acceptance / TRL-6 evidence run. |
+| `docs/` | Architecture notes; [`bringup_and_test.md`](docs/bringup_and_test.md): order, build, bring-up, calibration and the TRL-6 demonstration. |
 
 ## Boards
 
 | Board | Layers | Size | State |
 | --- | --- | --- | --- |
-| `main-board`: MCU, power, charger, left-ear analog, amp | 4 | 60 × 50 mm, 14 mm corners | Autorouted except **11 connections** (list under Status); no clearance/short/drill errors |
+| `main-board`: MCU, power, charger, left-ear analog, amp | 4 | 60 × 50 mm, 14 mm corners | Routed; DRC 0 unconnected, 0 electrical errors; fab files in `fab/` |
 | `satellite-board`: right-ear mic front ends | 2 | 34 × 26 mm | Routed; DRC 0 errors (silk warnings only); fab files in `fab/` |
 | `mic-board`: IM73A135 MEMS mic (×4 per helmet) | 2 | 11 × 13.2 mm | Routed; DRC clean; fab files in `fab/` |
 
@@ -77,13 +77,15 @@ Done:
 - [x] Satellite and mic boards routed, with Gerber, BOM and CPL files for JLCPCB
 - [x] Real-recording ANC study, SPICE verification of the analog chain, mechanical fit check
 - [x] Seal monitor (reference, study, firmware, FIL test)
+- [x] Main board fully routed (Freerouting + `hardware/gen/finish_route.py`), fab files for all three boards
+- [x] Printable STLs (`mechanical/stl/`, nominal earmuff), driver acceptance test in firmware, acceptance-test runner
 
 Remaining:
-- [ ] **Main board: finish 11 connections by hand in KiCad**, then `python3 pcb_build.py fab main-board`. The autorouter plateaus here. Left: `AMP_INLN` U10 pin 1 → C51 pin 1 (~4 mm); GND pads of C44, R1, U2 and R15; six small top-layer GND pour fragments, each needing one via to the inner GND plane. The DRC report is `hardware/main-board/fab/main-board-drc.rpt`.
-- [ ] **Driver:** choose one that gives ≥ 17 Pa/V at 63 Hz in the cup (a 16 Ω part is preferred); measure its Thiele-Small parameters and re-run `hardware/spice/run_spice.py`.
-- [ ] Open all three boards in KiCad 8/9 and run full ERC/DRC plus a 3D fit check before ordering.
+- [ ] **Order and build** following [`docs/bringup_and_test.md`](docs/bringup_and_test.md).
+- [ ] **Driver:** buy 2-3 candidate 40 mm drivers (16 Ω preferred) and keep one that passes `anc_tool.py driver-test` (≥ 17 Pa/V at 63 Hz in the cup).
+- [ ] Open all three boards in KiCad 8/9 for a last ERC/DRC and 3D look before ordering (KiCad 7 DRC here is clean apart from two reviewed connector-courtyard overlaps).
 - [ ] Measure the real earmuff, update `mechanical/params.scad`, re-run `check_fit.py`, export STLs.
-- [ ] Factory calibration on a reference head: `cal paths`, `cal mic …`, `seal learn`, `save`.
+- [ ] Calibrate and accept each helmet: `python3 tools/acceptance_test.py`, then the TRL-6 run (docs/bringup_and_test.md §6).
 - [ ] Bring-up and acoustic test on real hardware: SPL meter plus a 94 dB calibrator.
 
 ## Safety

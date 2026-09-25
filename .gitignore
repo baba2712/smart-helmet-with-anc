@@ -15,3 +15,4 @@ mechanical/*.stl.tmp
 hardware/**/route.out
 hardware/**/*.ses.log
 hardware/gen/logs/
+reports/*-selftest/

@@ -224,3 +224,52 @@ bool seal_learn_result(const seal_learn_t *l, float base[SEAL_MAX_BANDS])
         base[b] = dose_pa2_to_db((float)(l->ax[b] / l->n)) - dose_pa2_to_db((float)(l->ad[b] / l->n));
     return true;
 }
+
+/* ------------------------------------------------------------------ tone + lock-in */
+void tone_start(tone_t *t, float freq_hz, float amp, float settle_s, float meas_s)
+{
+    memset(t, 0, sizeof *t);
+    const float w = 6.28318531f * freq_hz / (float)ANC_FS_HZ;
+    t->wc = cosf(w);
+    t->ws = sinf(w);
+    t->c = 1.0f;
+    t->s = 0.0f;
+    t->amp = amp;
+    t->n_settle = (uint32_t)(settle_s * (float)ANC_FS_HZ);
+    /* whole periods only, so the lock-in has no leakage from the DC offset */
+    const uint32_t per = (uint32_t)((float)ANC_FS_HZ / freq_hz + 0.5f);
+    const uint32_t nm = (uint32_t)(meas_s * (float)ANC_FS_HZ);
+    t->n_total = t->n_settle + (per ? (nm / per) * per : nm);
+    t->active = true;
+}
+
+float DSP_FAST tone_next(tone_t *t)
+{
+    return t->active ? t->amp * t->s : 0.0f;
+}
+
+void DSP_FAST tone_update(tone_t *t, const float e[2])
+{
+    if (!t->active) return;
+    if (t->n >= t->n_settle) {
+        for (int k = 0; k < 2; k++) {
+            t->i_acc[k] += (double)(e[k] * t->s);
+            t->q_acc[k] += (double)(e[k] * t->c);
+        }
+    }
+    /* advance the rotator; renormalise so float error never grows */
+    const float c = t->c * t->wc - t->s * t->ws;
+    const float s = t->s * t->wc + t->c * t->ws;
+    const float g = 1.5f - 0.5f * (c * c + s * s);
+    t->c = c * g;
+    t->s = s * g;
+    if (++t->n >= t->n_total) t->active = false;
+}
+
+float tone_amplitude(const tone_t *t, int ear)
+{
+    const uint32_t nm = t->n_total - t->n_settle;
+    if (nm == 0u) return 0.0f;
+    const double i = t->i_acc[ear] / nm, q = t->q_acc[ear] / nm;
+    return (float)(2.0 * sqrt(i * i + q * q));
+}

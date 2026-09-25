@@ -114,3 +114,23 @@ int run_seal_learn(int n, const float *xc, const float *dh, float *base_out)
     }
     return seal_learn_result(&l, base_out) ? (int)l.n : 0;
 }
+
+/* tone + lock-in through the plant's secondary path (both "ears" see the same path);
+ * returns the measured amplitude at the error mic (Pa peak) */
+float run_tone(const double *h_S, int lp, float freq, float amp, const double *noise, int max_n)
+{
+    static tone_t t;
+    tone_start(&t, freq, amp, 0.3f, 2.0f);
+    double *yb = calloc((size_t)lp, sizeof(double));
+    for (int i = 0; i < max_n && !tone_done(&t); i++) {
+        double sy = 0;
+        for (int k = 0; k < lp - 1; k++) sy += h_S[k + 1] * yb[k];
+        const float e[2] = { (float)(sy + noise[i]), (float)(sy + noise[i]) };
+        const float y = tone_next(&t);
+        tone_update(&t, e);
+        memmove(yb + 1, yb, (size_t)(lp - 1) * sizeof(double));
+        yb[0] = y;
+    }
+    free(yb);
+    return tone_amplitude(&t, 0);
+}

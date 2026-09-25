@@ -12,6 +12,7 @@ typedef enum {
     MODE_ANC,            /* hybrid ANC */
     MODE_ANC_HT,         /* ANC + speech/alarm hear-through */
     MODE_ID,             /* speaker-path identification running (probe noise) */
+    MODE_TEST,           /* test tone + lock-in (driver acceptance), ANC off */
     MODE_COUNT
 } app_mode_t;
 
@@ -69,6 +70,11 @@ void app_defaults(app_cal_t *c);
 void app_init(void);
 void app_set_mode(app_mode_t m);
 bool app_start_id(bool refine, float seconds);   /* returns false if not allowed */
+/* driver acceptance: a freq_hz sine at amp_vpk (V peak at the amp output) on both ears;
+ * app_test_result() gives the in-cup pressure per amp volt (Pa/V) once app_test_done() */
+bool app_start_test(float freq_hz, float amp_vpk, float seconds);
+bool app_test_done(void);
+float app_test_result(int ear);
 bool app_id_running(void);
 int  app_finish_id(char *msg, int len);          /* call when ID done: validates, installs; 0 = ok */
 void app_apply_params(void);

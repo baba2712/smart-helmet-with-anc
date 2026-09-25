@@ -5,6 +5,7 @@
  *   dosimeter  - A-weighted exposure (LAeq, dose %, peak) at ear and outside
  *   hearthru   - speech-band pass-through with a hard level limiter
  *   seal       - in-use seal monitor: per-band passive attenuation vs a factory baseline
+ *   tone       - sine generator + two-channel lock-in (driver acceptance / bring-up tests)
  */
 #ifndef DSP_MISC_H
 #define DSP_MISC_H
@@ -133,6 +134,24 @@ bool seal_add_second(seal_t *m, const float ms_x[SEAL_MAX_BANDS], const float ms
 typedef struct { double ax[SEAL_MAX_BANDS], ad[SEAL_MAX_BANDS]; uint32_t n; } seal_learn_t;
 void seal_learn_add(seal_learn_t *l, const float ms_x[SEAL_MAX_BANDS], const float ms_d[SEAL_MAX_BANDS]);
 bool seal_learn_result(const seal_learn_t *l, float base[SEAL_MAX_BANDS]);    /* false if no data */
+
+/* ------------------------------------------------------------------ tone + lock-in
+ * Plays amp*sin(2 pi f n / fs); after a settling time, correlates each ear's error-mic
+ * signal with sin/cos of the same phase and returns the amplitude at f (Pa, peak). */
+typedef struct {
+    float c, s;              /* rotator state: cos/sin of the current phase */
+    float wc, ws;            /* per-sample rotation */
+    float amp;               /* output amplitude (controller units, peak) */
+    uint32_t n, n_settle, n_total;
+    double i_acc[2], q_acc[2];
+    bool active;
+} tone_t;
+
+void  tone_start(tone_t *t, float freq_hz, float amp, float settle_s, float meas_s);
+float tone_next(tone_t *t);                       /* ISR: this sample's output */
+void  tone_update(tone_t *t, const float e[2]);   /* ISR: this sample's error mics */
+static inline bool tone_done(const tone_t *t) { return !t->active; }
+float tone_amplitude(const tone_t *t, int ear);   /* Pa peak at f */
 
 #ifdef __cplusplus
 }

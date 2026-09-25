@@ -38,6 +38,9 @@ static bool         seal_warning;
 static seal_learn_t seal_lrn[2];
 static uint32_t     seal_learn_left;
 static comms_link_t seal_requester = LINK_ALL;
+static comms_link_t test_requester = LINK_ALL;
+static float        test_hz;
+#define DRIVER_MIN_PA_PER_V 17.0f      /* SPICE requirement: ~15 Pa of 63 Hz anti-noise at 0.9 V */
 
 extern uint32_t _sitcm, _itcm_start, _itcm_end;    /* linker */
 extern uint32_t _saxi, _eaxi;
@@ -135,6 +138,7 @@ static const char *HELP[] = {
     "cal check                   in-field fit check (refines the stored model)",
     "cal mic refl|errl|refr|errr [dB]   mic trim with a 1 kHz calibrator (default 94 dB)",
     "seal                        per-band cup attenuation vs the factory baseline, both ears",
+    "test driver [Hz] [mVpk]     driver acceptance: tone at the amp output, in-cup Pa/V (default 63 Hz, 100 mV)",
     "seal learn [s]              FACTORY: good fit on a reference head, >= 80 dB(A) broadband noise (default 10 s)",
     "get                         all settings",
     "set <key> <value>           mu_ff mu_fb ht_gain amp_gain dose_lc dose_q dose_thr default_mode boot_check",
@@ -231,6 +235,13 @@ static void on_line(comms_link_t l, char *s)
         id_requester = l;
         if (!app_start_id(false, secs)) { out(l, "ERR busy"); return; }
         out(l, "calibrating speaker paths for %.0f s - keep quiet, helmet on", (double)secs);
+    } else if (!strcmp(c, "test") && argc > 1 && !strcmp(argv[1], "driver")) {
+        const float hz = (argc > 2) ? strtof(argv[2], NULL) : 63.0f;
+        const float mv = (argc > 3) ? strtof(argv[3], NULL) : 100.0f;
+        if (!app_start_test(hz, mv * 1e-3f, 2.0f)) { out(l, "ERR busy, or Hz 20..4000, mVpk 1..%u", (unsigned)(AMP_OUT_VPK * 1000.0f)); return; }
+        test_requester = l;
+        test_hz = hz;
+        out(l, "driver test: %.0f Hz, %.0f mV peak at the amp, 2.3 s - helmet on the test head", (double)hz, (double)mv);
     } else if (!strcmp(c, "cal") && argc > 1 && !strcmp(argv[1], "check")) {
         id_requester = l;
         if (!app_start_id(true, 2.0f)) { out(l, "ERR not calibrated or busy"); return; }
@@ -311,7 +322,7 @@ static void seal_every_second(void)
 {
     if (!g_seal_rt.ready) return;
     g_seal_rt.ready = false;
-    if (g_app.mode == MODE_ID) return;                         /* probe noise is not ambient */
+    if (g_app.mode == MODE_ID || g_app.mode == MODE_TEST) return;   /* probe/tone is not ambient */
     if (seal_learn_left) {
         for (int e = 0; e < 2; e++) seal_learn_add(&seal_lrn[e], g_seal_rt.sec_ms[e][0], g_seal_rt.sec_ms[e][1]);
         if (--seal_learn_left == 0u) {
@@ -444,6 +455,14 @@ int main(void)
         hw_watchdog_kick();
         comms_poll(on_line);
         finish_id_if_done();
+        if (app_test_done()) {
+            const float l = app_test_result(EAR_L), r = app_test_result(EAR_R);
+            const bool lf = test_hz < 100.0f;          /* the pass limit is defined at low frequency */
+            out(test_requester, "driver test %.0f Hz: L %.1f Pa/V, R %.1f Pa/V%s", (double)test_hz, (double)l, (double)r,
+                !lf ? "" : (l >= DRIVER_MIN_PA_PER_V && r >= DRIVER_MIN_PA_PER_V) ? " - PASS (>= 17 Pa/V)"
+                                                                                   : " - FAIL (need >= 17 Pa/V)");
+            update_led();
+        }
         mic_cal_poll();
 
         if (g_dosi.ready) { g_dosi.ready = false; every_second(); t_sec = hw_millis(); }

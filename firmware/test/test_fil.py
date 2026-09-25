@@ -50,6 +50,8 @@ lib.run_seal.argtypes = [C.c_int, fp, fp, fp, fp, fp, fp, ip, ip]
 lib.run_seal.restype = C.c_int
 lib.run_seal_learn.argtypes = [C.c_int, fp, fp, fp]
 lib.run_seal_learn.restype = C.c_int
+lib.run_tone.argtypes = [dp, C.c_int, C.c_float, C.c_float, dp, C.c_int]
+lib.run_tone.restype = C.c_float
 
 failures = []
 
@@ -152,6 +154,14 @@ for seal, kind, want in ((1.0, "motor", False), (1.0, "compressor", False), (0.7
     check(got == ns and dil < 0.05 and same and bool(flag_c[-1]) == want,
           f"seal {seal:.1f} {kind:10s} C vs python band IL max diff {dil:.3f} dB, flags identical {same}, "
           f"loss {avg_c[-1]:.1f} dB -> {'LEAK' if flag_c[-1] else 'ok'} (expect {'LEAK' if want else 'ok'})")
+
+# ---- 5) driver acceptance tone + lock-in ----
+noise = np.random.default_rng(9).standard_normal(4 * FS) * 6e-4
+for f_hz in (63.0, 1000.0):
+    want = abs(np.sum(pl.h_S[1:] * np.exp(-2j * np.pi * f_hz * np.arange(1, len(pl.h_S)) / FS)))
+    got = lib.run_tone(pl.h_S, len(pl.h_S), C.c_float(f_hz), C.c_float(0.5), noise, len(noise))
+    check(abs(got / (0.5 * want) - 1) < 0.01,
+          f"tone lock-in {f_hz:.0f} Hz: measured {got:.4f} Pa vs path gain x amplitude {0.5 * want:.4f} Pa")
 
 print()
 print("ALL PASS" if not failures else f"{len(failures)} FAILURE(S)")

@@ -45,9 +45,11 @@ LAYOUTS = {
             "SW1": (23.8, 46.4, 0, "B"),        # power button - back side: plunger runs straight to the shell
             "J3": (17.0, 46.9, 0, "F"),         # external button, bottom edge
             "SW2": (43.0, 31.5, 90, "F"),       # BOOT
-            "D4": (29.2, 47.6, 0, "B"),         # status LEDs - back side, under the light pipe
-            "D5": (31.2, 47.6, 0, "B"),
-            "D6": (33.2, 47.6, 0, "B"),
+            # status LEDs - back side, under the light pipe; rotated so the 0603 pads stack
+            # along y (at rot 0 the 1.6 mm pad span doesn't fit the 2 mm pitch)
+            "D4": (29.2, 47.6, 90, "B"),
+            "D5": (31.2, 47.6, 90, "B"),
+            "D6": (33.2, 47.6, 90, "B"),
             "H1": (7.2, 8.8, 0, "F"),
             "H2": (52.8, 42.8, 0, "F"),
             "H3": (6.8, 43.2, 0, "F"),

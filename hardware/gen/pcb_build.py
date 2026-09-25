@@ -426,7 +426,7 @@ def stage_place(name):
     bds = board.GetDesignSettings()
     bds.m_TrackMinWidth = MM(0.127)
     bds.m_ViasMinSize = MM(0.5)
-    bds.m_MinThroughDrill = MM(0.3)
+    bds.m_MinThroughDrill = MM(0.2)          # TI QFN/WQFN thermal-pad vias (JLCPCB 4-layer: 0.15 mm min)
     bds.m_CopperEdgeClearance = MM(0.3)
     bds.m_HoleClearance = MM(0.25)
     bds.m_HoleToHoleMin = MM(0.25)

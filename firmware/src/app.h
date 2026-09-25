@@ -12,6 +12,7 @@ typedef enum {
     MODE_ANC,            /* hybrid ANC */
     MODE_ANC_HT,         /* ANC + speech/alarm hear-through */
     MODE_ID,             /* speaker-path identification running (probe noise) */
+    MODE_TEST,           /* test tone + lock-in (driver acceptance), ANC off */
     MODE_COUNT
 } app_mode_t;
 
@@ -30,6 +31,10 @@ typedef struct {
     uint8_t boot_refine;           /* 2 s path check at power-on */
     uint8_t amp_gain;              /* TPA6132A2 G1:G0 */
     uint32_t serial;
+    /* --- v3: seal monitor (new fields go at the end: store.c migrates older blobs) --- */
+    float seal_base[2][SEAL_MAX_BANDS];   /* factory per-band passive attenuation, dB */
+    uint8_t seal_valid;                   /* 'seal learn' done */
+    uint8_t pad_[3];
 } app_cal_t;
 
 typedef struct {
@@ -50,6 +55,7 @@ extern anc_t       g_anc[2];
 extern sysid_t     g_id[2];
 extern dosi_rt_t   g_dosi;
 extern hearthru_t  g_ht[2];
+extern seal_rt_t   g_seal_rt;
 
 /* raw (unweighted) 1-second mean square of each mic, for calibration and status */
 typedef struct {
@@ -64,6 +70,11 @@ void app_defaults(app_cal_t *c);
 void app_init(void);
 void app_set_mode(app_mode_t m);
 bool app_start_id(bool refine, float seconds);   /* returns false if not allowed */
+/* driver acceptance: a freq_hz sine at amp_vpk (V peak at the amp output) on both ears;
+ * app_test_result() gives the in-cup pressure per amp volt (Pa/V) once app_test_done() */
+bool app_start_test(float freq_hz, float amp_vpk, float seconds);
+bool app_test_done(void);
+float app_test_result(int ear);
 bool app_id_running(void);
 int  app_finish_id(char *msg, int len);          /* call when ID done: validates, installs; 0 = ok */
 void app_apply_params(void);

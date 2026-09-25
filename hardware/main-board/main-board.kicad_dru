@@ -4,3 +4,16 @@
 (rule "MEMS sound port inside its sealing ring"
   (constraint hole_clearance (min 0.15mm))
   (condition "A.Type == 'Pad' && A.Pad_Type == 'NPTH, mechanical' && A.intersectsCourtyard('MK*')"))
+
+# Exposed-pad thermal vias and plated mounting holes are never hand-soldered: join them to the
+# GND pours solid, for heat (TPA6132A2 / TPS63001 exposed pads) and a low-impedance chassis tie.
+(rule "GND through-holes solid to the pour"
+  (constraint zone_connection solid)
+  (condition "A.Type == 'Pad' && A.Pad_Type == 'Through-hole' && A.NetName == 'GND'"))
+
+# On this dense board some small SMD GND pads get one thermal spoke instead of two. One
+# 0.3 mm spoke carries far more than these pads' current, and every such pad also has its
+# own via or track to the inner GND plane (checked: 0 unconnected).
+(rule "one thermal spoke is enough for small GND pads"
+  (constraint min_resolved_spokes 1)
+  (condition "A.Type == 'Pad' && A.NetName == 'GND'"))

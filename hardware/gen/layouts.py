@@ -15,7 +15,7 @@ LAYOUTS = {
     "main-board": {
         # 14 mm corners: the board has to sit inside an elliptical earcup (72 x 62 mm
         # inside, see mechanical/params.scad) - a 6 mm-corner rectangle doesn't fit.
-        "size": (60.0, 50.0), "corner": 14.0, "layers": 4,
+        "size": (60.0, 50.0), "corner": 14.0, "layers": 4, "refs_on_fab": True,   # dense: refs on F.Fab, not silk
         "anchors": {
             # ref: (x, y, rot, side)
             "U5": (30.0, 25.0, 0, "F"),        # STM32H743 LQFP-100
@@ -45,9 +45,11 @@ LAYOUTS = {
             "SW1": (23.8, 46.4, 0, "B"),        # power button - back side: plunger runs straight to the shell
             "J3": (17.0, 46.9, 0, "F"),         # external button, bottom edge
             "SW2": (43.0, 31.5, 90, "F"),       # BOOT
-            "D4": (29.2, 47.6, 0, "B"),         # status LEDs - back side, under the light pipe
-            "D5": (31.2, 47.6, 0, "B"),
-            "D6": (33.2, 47.6, 0, "B"),
+            # status LEDs - back side, under the light pipe; rotated so the 0603 pads stack
+            # along y (at rot 0 the 1.6 mm pad span doesn't fit the 2 mm pitch)
+            "D4": (29.2, 47.6, 90, "B"),
+            "D5": (31.2, 47.6, 90, "B"),
+            "D6": (33.2, 47.6, 90, "B"),
             "H1": (7.2, 8.8, 0, "F"),
             "H2": (52.8, 42.8, 0, "F"),
             "H3": (6.8, 43.2, 0, "F"),

@@ -32,6 +32,15 @@ static int      mic_cal_ch = -1;
 static float    mic_cal_db;
 static comms_link_t mic_cal_link;
 static bool     fit_warning;
+/* seal monitor: per-ear decision state, factory-baseline learning */
+static seal_t       g_seal[2];
+static bool         seal_warning;
+static seal_learn_t seal_lrn[2];
+static uint32_t     seal_learn_left;
+static comms_link_t seal_requester = LINK_ALL;
+static comms_link_t test_requester = LINK_ALL;
+static float        test_hz;
+#define DRIVER_MIN_PA_PER_V 17.0f      /* SPICE requirement: ~15 Pa of 63 Hz anti-noise at 0.9 V */
 
 extern uint32_t _sitcm, _itcm_start, _itcm_end;    /* linker */
 extern uint32_t _saxi, _eaxi;
@@ -60,25 +69,28 @@ static void print_status(comms_link_t l)
 {
     out(l, "{\"mode\":\"%s\",\"cal\":%u,\"ear_dba\":%.1f,\"amb_dba\":%.1f,\"atten_db\":%.1f,\"dose_pct\":%.2f,"
            "\"dose_unprot_pct\":%.1f,\"laeq_shift\":%.1f,\"vbat\":%.2f,\"chg\":%u,\"usb\":%u,\"ble\":%u,\"cpu_pct\":%.1f,"
-           "\"isr_us_max\":%.1f,\"trips\":[%lu,%lu],\"ovl\":%lu,\"adc_ovr\":%lu,\"fit_warn\":%u}",
+           "\"isr_us_max\":%.1f,\"trips\":[%lu,%lu],\"ovl\":%lu,\"adc_ovr\":%lu,\"fit_warn\":%u,"
+           "\"seal_cal\":%u,\"seal_loss_db\":[%.1f,%.1f],\"seal_leak\":[%u,%u]}",
         app_mode_name(g_app.mode), g_cal.paths_valid, (double)g_dose.laeq_1s_ear, (double)g_dose.laeq_1s_amb,
         (double)(g_dose.laeq_1s_amb - g_dose.laeq_1s_ear), g_dose.dose_pct, g_dose.dose_amb_pct,
         (double)dose_laeq(g_dose.e_ear, g_dose.seconds), (double)power_vbat(), power_charging(),
         power_usb_present(), comms_ble_connected(), (double)cpu_load_pct(),
         (double)((float)audio_isr_cycles_max * 1e6f / (float)SystemCoreClock),
         (unsigned long)g_app.trips[0], (unsigned long)g_app.trips[1], (unsigned long)g_app.overload_count,
-        (unsigned long)audio_overruns, fit_warning);
+        (unsigned long)audio_overruns, fit_warning, g_cal.seal_valid, (double)g_seal[0].avg, (double)g_seal[1].avg,
+        g_seal[0].flag, g_seal[1].flag);
 }
 
 static void update_led(void)
 {
     if (power_vbat() < VBAT_LOW_V && !power_usb_present()) { led_set(LED_LOW_BATT); return; }
     if (g_app.overload) { led_set(LED_FAULT); return; }
+    const bool warn = fit_warning || seal_warning;       /* amber: reseat the cup */
     switch (g_app.mode) {
     case MODE_ID:      led_set(LED_ID); break;
-    case MODE_ANC:     led_set(fit_warning ? LED_FIT_WARN : LED_ANC); break;
-    case MODE_ANC_HT:  led_set(fit_warning ? LED_FIT_WARN : LED_ANC_HT); break;
-    default:           led_set(g_cal.paths_valid ? LED_PASSIVE : LED_NEEDS_CAL); break;
+    case MODE_ANC:     led_set(warn ? LED_FIT_WARN : LED_ANC); break;
+    case MODE_ANC_HT:  led_set(warn ? LED_FIT_WARN : LED_ANC_HT); break;
+    default:           led_set(!g_cal.paths_valid ? LED_NEEDS_CAL : (seal_warning ? LED_FIT_WARN : LED_PASSIVE)); break;
     }
 }
 
@@ -125,6 +137,9 @@ static const char *HELP[] = {
     "cal paths [s]               FACTORY: speaker-path calibration, quiet room, helmet on head/dummy (default 3 s)",
     "cal check                   in-field fit check (refines the stored model)",
     "cal mic refl|errl|refr|errr [dB]   mic trim with a 1 kHz calibrator (default 94 dB)",
+    "seal                        per-band cup attenuation vs the factory baseline, both ears",
+    "test driver [Hz] [mVpk]     driver acceptance: tone at the amp output, in-cup Pa/V (default 63 Hz, 100 mV)",
+    "seal learn [s]              FACTORY: good fit on a reference head, >= 80 dB(A) broadband noise (default 10 s)",
     "get                         all settings",
     "set <key> <value>           mu_ff mu_fb ht_gain amp_gain dose_lc dose_q dose_thr default_mode boot_check",
     "save                        write settings + calibration to flash",
@@ -220,6 +235,13 @@ static void on_line(comms_link_t l, char *s)
         id_requester = l;
         if (!app_start_id(false, secs)) { out(l, "ERR busy"); return; }
         out(l, "calibrating speaker paths for %.0f s - keep quiet, helmet on", (double)secs);
+    } else if (!strcmp(c, "test") && argc > 1 && !strcmp(argv[1], "driver")) {
+        const float hz = (argc > 2) ? strtof(argv[2], NULL) : 63.0f;
+        const float mv = (argc > 3) ? strtof(argv[3], NULL) : 100.0f;
+        if (!app_start_test(hz, mv * 1e-3f, 2.0f)) { out(l, "ERR busy, or Hz 20..4000, mVpk 1..%u", (unsigned)(AMP_OUT_VPK * 1000.0f)); return; }
+        test_requester = l;
+        test_hz = hz;
+        out(l, "driver test: %.0f Hz, %.0f mV peak at the amp, 2.3 s - helmet on the test head", (double)hz, (double)mv);
     } else if (!strcmp(c, "cal") && argc > 1 && !strcmp(argv[1], "check")) {
         id_requester = l;
         if (!app_start_id(true, 2.0f)) { out(l, "ERR not calibrated or busy"); return; }
@@ -257,8 +279,26 @@ static void on_line(comms_link_t l, char *s)
         memcpy(g_cal.mic_gain, keep.mic_gain, sizeof g_cal.mic_gain);
         g_cal.paths_valid = keep.paths_valid;
         g_cal.serial = keep.serial;
+        memcpy(g_cal.seal_base, keep.seal_base, sizeof g_cal.seal_base);
+        g_cal.seal_valid = keep.seal_valid;
         app_apply_params();
         out(l, "OK defaults (not saved)");
+    } else if (!strcmp(c, "seal") && argc > 1 && !strcmp(argv[1], "learn")) {
+        const float secs = (argc > 2) ? strtof(argv[2], NULL) : 10.0f;
+        if (secs < 3.0f || secs > 60.0f) { out(l, "ERR seconds 3..60"); return; }
+        memset(seal_lrn, 0, sizeof seal_lrn);
+        seal_requester = l;
+        seal_learn_left = (uint32_t)secs;
+        out(l, "learning the seal baseline for %u s - keep the helmet still in steady broadband noise", (unsigned)secs);
+    } else if (!strcmp(c, "seal")) {
+        for (int e = 0; e < 2; e++) {
+            const seal_t *m = &g_seal[e];
+            out(l, "%s: loss %.1f dB %s%s | IL %.1f %.1f %.1f %.1f dB | base %.1f %.1f %.1f %.1f dB", e ? "R" : "L",
+                (double)m->avg, m->flag ? "LEAK" : "ok", m->valid ? "" : " (too quiet to judge)",
+                (double)m->il[0], (double)m->il[1], (double)m->il[2], (double)m->il[3],
+                (double)m->base[0], (double)m->base[1], (double)m->base[2], (double)m->base[3]);
+        }
+        if (!g_cal.seal_valid) out(l, "no seal baseline - run 'seal learn' (factory)");
     } else if (!strcmp(c, "reboot")) {
         out(l, "rebooting"); hw_delay_ms(50); NVIC_SystemReset();
     } else if (!strcmp(c, "dfu")) {
@@ -272,6 +312,38 @@ static void on_line(comms_link_t l, char *s)
 }
 
 /* ------------------------------------------------------------------ periodic work */
+static void seal_init_all(void)
+{
+    for (int e = 0; e < 2; e++) seal_init(&g_seal[e], g_cal.seal_base[e]);
+    seal_warning = false;
+}
+
+static void seal_every_second(void)
+{
+    if (!g_seal_rt.ready) return;
+    g_seal_rt.ready = false;
+    if (g_app.mode == MODE_ID || g_app.mode == MODE_TEST) return;   /* probe/tone is not ambient */
+    if (seal_learn_left) {
+        for (int e = 0; e < 2; e++) seal_learn_add(&seal_lrn[e], g_seal_rt.sec_ms[e][0], g_seal_rt.sec_ms[e][1]);
+        if (--seal_learn_left == 0u) {
+            bool ok = true;
+            for (int e = 0; e < 2; e++) ok = seal_learn_result(&seal_lrn[e], g_cal.seal_base[e]) && ok;
+            g_cal.seal_valid = ok;
+            seal_init_all();
+            out(seal_requester, ok ? "seal baseline L %.1f %.1f %.1f %.1f / R %.1f %.1f %.1f %.1f dB - 'save' to keep"
+                                   : "ERR seal baseline: no data",
+                (double)g_cal.seal_base[0][0], (double)g_cal.seal_base[0][1], (double)g_cal.seal_base[0][2],
+                (double)g_cal.seal_base[0][3], (double)g_cal.seal_base[1][0], (double)g_cal.seal_base[1][1],
+                (double)g_cal.seal_base[1][2], (double)g_cal.seal_base[1][3]);
+        }
+        return;
+    }
+    if (!g_cal.seal_valid) return;
+    for (int e = 0; e < 2; e++) seal_add_second(&g_seal[e], g_seal_rt.sec_ms[e][0], g_seal_rt.sec_ms[e][1]);
+    seal_warning = g_seal[0].flag || g_seal[1].flag;
+    if (seal_warning) min_flags |= 16u;
+}
+
 static void every_second(void)
 {
     const float ms_ear = 0.5f * (g_dosi.sec_ms[0] + g_dosi.sec_ms[1]);
@@ -280,6 +352,7 @@ static void every_second(void)
     min_e_ear += pow(10.0, (double)g_dose.laeq_1s_ear / 10.0);
     min_e_amb += pow(10.0, (double)g_dose.laeq_1s_amb / 10.0);
     if (g_app.overload) min_flags |= 1u;
+    seal_every_second();
     if (++sec_in_min >= 60u) { minutes_on++; save_state_record(); }
 
     power_poll();
@@ -360,6 +433,7 @@ int main(void)
     }
 
     app_init();
+    seal_init_all();
     audio_init();
     comms_init();
     audio_start();
@@ -381,6 +455,14 @@ int main(void)
         hw_watchdog_kick();
         comms_poll(on_line);
         finish_id_if_done();
+        if (app_test_done()) {
+            const float l = app_test_result(EAR_L), r = app_test_result(EAR_R);
+            const bool lf = test_hz < 100.0f;          /* the pass limit is defined at low frequency */
+            out(test_requester, "driver test %.0f Hz: L %.1f Pa/V, R %.1f Pa/V%s", (double)test_hz, (double)l, (double)r,
+                !lf ? "" : (l >= DRIVER_MIN_PA_PER_V && r >= DRIVER_MIN_PA_PER_V) ? " - PASS (>= 17 Pa/V)"
+                                                                                   : " - FAIL (need >= 17 Pa/V)");
+            update_led();
+        }
         mic_cal_poll();
 
         if (g_dosi.ready) { g_dosi.ready = false; every_second(); t_sec = hw_millis(); }

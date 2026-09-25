@@ -8,6 +8,7 @@
 #include "store.h"
 #include "hw.h"
 #include <string.h>
+#include <stddef.h>
 
 #define CAL_SECTOR     5u
 #define LOG_SECTOR_A   6u
@@ -16,7 +17,8 @@
 #define SECT_ADDR(s)   (FLASH_BANK2_BASE + (s) * SECTOR_SIZE)
 #define REC_PER_SECT   (SECTOR_SIZE / sizeof(store_rec_t))
 #define CAL_MAGIC      0x414E4331u    /* "ANC1" */
-#define CAL_VERSION    2u
+#define CAL_VERSION    3u
+#define CAL_V2_SIZE    ((uint32_t)offsetof(app_cal_t, seal_base))   /* v2 = v3 without the seal block */
 
 typedef struct {
     uint32_t magic, version, size, reserved;
@@ -89,10 +91,16 @@ static bool fl_program(uint32_t addr, const void *src, uint32_t n)
 bool store_load_cal(app_cal_t *c)
 {
     const cal_blob_t *b = (const cal_blob_t *)SECT_ADDR(CAL_SECTOR);
-    const uint32_t *crc = (const uint32_t *)((const uint8_t *)b + sizeof(cal_blob_t));
-    if (b->magic != CAL_MAGIC || b->version != CAL_VERSION || b->size != sizeof(app_cal_t)) return false;
-    if (*crc != store_crc32(b, sizeof(cal_blob_t))) return false;
-    memcpy(c, &b->cal, sizeof *c);
+    uint32_t sz;
+    if (b->magic != CAL_MAGIC) return false;
+    if (b->version == CAL_VERSION && b->size == sizeof(app_cal_t)) sz = sizeof(app_cal_t);
+    else if (b->version == 2u && b->size == CAL_V2_SIZE) sz = CAL_V2_SIZE;   /* keep the path calibration */
+    else return false;
+    const uint32_t hdr = (uint32_t)offsetof(cal_blob_t, cal);
+    const uint32_t *crc = (const uint32_t *)((const uint8_t *)b + hdr + sz);
+    if (*crc != store_crc32(b, hdr + sz)) return false;
+    memset(c, 0, sizeof *c);                 /* fields newer than the blob: zero = not calibrated */
+    memcpy(c, &b->cal, sz);
     return true;
 }
 

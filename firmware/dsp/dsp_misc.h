@@ -4,6 +4,8 @@
  *   sysid      - speaker->mic path identification (boot / factory calibration)
  *   dosimeter  - A-weighted exposure (LAeq, dose %, peak) at ear and outside
  *   hearthru   - speech-band pass-through with a hard level limiter
+ *   seal       - in-use seal monitor: per-band passive attenuation vs a factory baseline
+ *   tone       - sine generator + two-channel lock-in (driver acceptance / bring-up tests)
  */
 #ifndef DSP_MISC_H
 #define DSP_MISC_H
@@ -96,6 +98,60 @@ typedef struct {
 
 void  hearthru_init(hearthru_t *h, float gain, float limit_db_spl);
 float hearthru_run(hearthru_t *h, float ref_pa);
+
+/* ------------------------------------------------------------------ seal monitor
+ * Reference: sim/seal_ref.py (filters, per-second arithmetic and decisions match).
+ * ISR: octave-band mean squares of x_c (outside, speaker leakage removed) and
+ * d_hat (noise that came through the cup, ANC removed), per ear, over 1 s.
+ * Main loop (1 Hz): per-band attenuation vs the factory baseline -> drop, flag. */
+#define SEAL_MAX_BANDS 4u
+
+typedef struct {
+    biquad_state_t bq[2][2][SEAL_MAX_BANDS][2];   /* ear, signal (x_c, d_hat), band, section */
+    float acc[2][2][SEAL_MAX_BANDS];
+    uint32_t n;
+    volatile bool ready;
+    float sec_ms[2][2][SEAL_MAX_BANDS];          /* Pa^2, last complete second */
+} seal_rt_t;
+
+void seal_rt_init(seal_rt_t *s);
+void seal_rt_sample(seal_rt_t *s, const float xc[2], const float dh[2]);     /* ISR, every sample */
+
+typedef struct {
+    float base[SEAL_MAX_BANDS];    /* factory per-band attenuation (dB) */
+    float il[SEAL_MAX_BANDS];      /* last second's per-band attenuation (dB) */
+    float drop;                    /* last valid second: mean(base - il) over active bands */
+    float avg;                     /* smoothed drop (dB) - the reported seal loss */
+    uint32_t n_valid, run;
+    bool valid;                    /* last second had enough noise to judge */
+    bool flag;                     /* seal leak */
+} seal_t;
+
+void seal_init(seal_t *m, const float base[SEAL_MAX_BANDS]);
+bool seal_add_second(seal_t *m, const float ms_x[SEAL_MAX_BANDS], const float ms_d[SEAL_MAX_BANDS]);
+
+/* factory baseline: energy-mean attenuation per band over the learning seconds */
+typedef struct { double ax[SEAL_MAX_BANDS], ad[SEAL_MAX_BANDS]; uint32_t n; } seal_learn_t;
+void seal_learn_add(seal_learn_t *l, const float ms_x[SEAL_MAX_BANDS], const float ms_d[SEAL_MAX_BANDS]);
+bool seal_learn_result(const seal_learn_t *l, float base[SEAL_MAX_BANDS]);    /* false if no data */
+
+/* ------------------------------------------------------------------ tone + lock-in
+ * Plays amp*sin(2 pi f n / fs); after a settling time, correlates each ear's error-mic
+ * signal with sin/cos of the same phase and returns the amplitude at f (Pa, peak). */
+typedef struct {
+    float c, s;              /* rotator state: cos/sin of the current phase */
+    float wc, ws;            /* per-sample rotation */
+    float amp;               /* output amplitude (controller units, peak) */
+    uint32_t n, n_settle, n_total;
+    double i_acc[2], q_acc[2];
+    bool active;
+} tone_t;
+
+void  tone_start(tone_t *t, float freq_hz, float amp, float settle_s, float meas_s);
+float tone_next(tone_t *t);                       /* ISR: this sample's output */
+void  tone_update(tone_t *t, const float e[2]);   /* ISR: this sample's error mics */
+static inline bool tone_done(const tone_t *t) { return !t->active; }
+float tone_amplitude(const tone_t *t, int ear);   /* Pa peak at f */
 
 #ifdef __cplusplus
 }

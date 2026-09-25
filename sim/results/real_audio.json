@@ -1,0 +1,84 @@
+{
+  "ambient_dba": 100.0,
+  "seconds": 20,
+  "source": "ESC-50 (CC BY-NC 3.0)",
+  "cases": [
+    {
+      "category": "engine",
+      "open_dba": 99.68729853761766,
+      "passive_dba": 78.33868360413203,
+      "anc_dba": 74.77982932662384,
+      "trips": 6,
+      "peak_y_pa": 10.0,
+      "anc_2x_headroom_dba": 73.92443088571403,
+      "trips_2x_headroom": 0,
+      "anc_80_500_db": 8.907582078899182
+    },
+    {
+      "category": "chainsaw",
+      "open_dba": 100.57113645406767,
+      "passive_dba": 73.3702171607145,
+      "anc_dba": 69.02676993563037,
+      "trips": 0,
+      "peak_y_pa": 3.8884976529206408,
+      "anc_2x_headroom_dba": 69.02676993563037,
+      "trips_2x_headroom": 0,
+      "anc_80_500_db": 17.496458149466456
+    },
+    {
+      "category": "hand_saw",
+      "open_dba": 99.84403070725763,
+      "passive_dba": 69.54752699065303,
+      "anc_dba": 68.77749415206786,
+      "trips": 0,
+      "peak_y_pa": 1.6893972696465633,
+      "anc_2x_headroom_dba": 68.77749415206786,
+      "trips_2x_headroom": 0,
+      "anc_80_500_db": 12.479335242285806
+    },
+    {
+      "category": "helicopter",
+      "open_dba": 97.30366313296598,
+      "passive_dba": 72.65908043535094,
+      "anc_dba": 69.93199613886327,
+      "trips": 0,
+      "peak_y_pa": 9.469372247181425,
+      "anc_2x_headroom_dba": 69.93199613886327,
+      "trips_2x_headroom": 0,
+      "anc_80_500_db": 9.926808127791972
+    },
+    {
+      "category": "train",
+      "open_dba": 101.31227416339041,
+      "passive_dba": 78.58424091846864,
+      "anc_dba": 71.83684948775844,
+      "trips": 2,
+      "peak_y_pa": 10.0,
+      "anc_2x_headroom_dba": 71.84059783565077,
+      "trips_2x_headroom": 0,
+      "anc_80_500_db": 17.288033789604413
+    },
+    {
+      "category": "vacuum_cleaner",
+      "open_dba": 97.95628078336782,
+      "passive_dba": 73.74180412526822,
+      "anc_dba": 65.29299634464638,
+      "trips": 0,
+      "peak_y_pa": 2.8849618216009256,
+      "anc_2x_headroom_dba": 65.29299634464638,
+      "trips_2x_headroom": 0,
+      "anc_80_500_db": 26.96179099280679
+    },
+    {
+      "category": "washing_machine",
+      "open_dba": 102.08976479963796,
+      "passive_dba": 74.87269115926766,
+      "anc_dba": 68.39362039174924,
+      "trips": 0,
+      "peak_y_pa": 3.2334609094022206,
+      "anc_2x_headroom_dba": 68.39362039174924,
+      "trips_2x_headroom": 0,
+      "anc_80_500_db": 27.87953456987804
+    }
+  ]
+}

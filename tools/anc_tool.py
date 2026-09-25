@@ -7,8 +7,10 @@
     python3 anc_tool.py plot                   live plot: outside vs at-ear dB(A)
     python3 anc_tool.py cal-paths [--seconds 3]    factory speaker-path calibration (quiet room!)
     python3 anc_tool.py cal-mic refl [--db 94]     mic trim with a 1 kHz calibrator
+    python3 anc_tool.py driver-test [Hz] [mVpk]    in-cup Pa/V of the drivers (PASS >= 17 at 63 Hz)
     python3 anc_tool.py log out.csv            download the minute-by-minute exposure log
     python3 anc_tool.py set mu_ff 0.0015       change a setting (then: anc_tool.py raw save)
+    python3 anc_tool.py raw "seal learn 10"    FACTORY: seal baseline (good fit, >= 80 dB(A) broadband noise)
     python3 anc_tool.py raw "<command>"        send any CLI command, print the reply
     python3 anc_tool.py shell                  interactive terminal
 
@@ -66,10 +68,20 @@ class Helmet:
         return None
 
 
+def fmt_seal(st):
+    """Seal monitor: loss vs the factory baseline per ear (older firmware has no seal fields)."""
+    if not st.get("seal_cal"):
+        return "seal: no baseline" if "seal_cal" in st else ""
+    ears = [f"{side} {loss:+.1f} dB{' LEAK' if leak else ''}"
+            for side, loss, leak in zip("LR", st["seal_loss_db"], st["seal_leak"])]
+    return "seal " + ", ".join(ears) + ("  -> RESEAT THE CUP" if any(st["seal_leak"]) else "")
+
+
 def fmt(st):
     return (f"{st['mode']:8s} ear {st['ear_dba']:5.1f} dB(A)  outside {st['amb_dba']:5.1f}  "
             f"reduction {st['atten_db']:5.1f} dB  dose {st['dose_pct']:6.2f}% (unprotected {st['dose_unprot_pct']:.0f}%)  "
-            f"batt {st['vbat']:.2f} V{' chg' if st['chg'] else ''}  cpu {st['cpu_pct']:.0f}%  trips {st['trips']}")
+            f"batt {st['vbat']:.2f} V{' chg' if st['chg'] else ''}  cpu {st['cpu_pct']:.0f}%  trips {st['trips']}  "
+            + fmt_seal(st))
 
 
 def main():
@@ -115,6 +127,12 @@ def main():
         print("\n".join(h.cmd(f"cal paths {a.seconds:.0f}")))
         time.sleep(a.seconds + 0.5)
         print("\n".join(h.cmd("status", timeout=3)))
+    elif a.what == "driver-test":
+        # tone at the amp output, lock-in on the error mics: in-cup Pa/V, PASS >= 17 at 63 Hz
+        hz = a.args[0] if a.args else "63"
+        mv = a.args[1] if len(a.args) > 1 else "100"
+        for ln in h.cmd(f"test driver {hz} {mv}", wait_end="driver test ", timeout=6):
+            print(ln)
     elif a.what == "cal-mic":
         if not a.args:
             sys.exit("which mic: refl errl refr errr")

@@ -1,0 +1,5 @@
+Comment,Designator,Footprint,Quantity,Manufacturer Part,LCSC Part #,Notes
+100n,C1,C_0402_1005Metric,1,100n X7R,,
+1u,C2,C_0402_1005Metric,1,1u X5R,,
+MIC,J1,JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal,1,JST SM04B-SRSS-TB,,
+IM73A135V01,MK1,Infineon_PG-LLGA-5-2,1,IM73A135V01XTSA1,,bottom port: sound enters through the PCB hole - mount the plain back side toward the sound

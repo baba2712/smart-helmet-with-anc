@@ -1,0 +1,9 @@
+[submodule "firmware/third_party/cmsis_device_h7"]
+	path = firmware/third_party/cmsis_device_h7
+	url = https://github.com/STMicroelectronics/cmsis_device_h7.git
+[submodule "firmware/third_party/CMSIS_6"]
+	path = firmware/third_party/CMSIS_6
+	url = https://github.com/ARM-software/CMSIS_6.git
+[submodule "firmware/third_party/tinyusb"]
+	path = firmware/third_party/tinyusb
+	url = https://github.com/hathach/tinyusb.git

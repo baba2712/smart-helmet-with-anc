@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+firmware/build/
+firmware/test/build/
+hardware/**/*-backups/
+hardware/**/fp-info-cache
+hardware/**/*.kicad_prl
+hardware/**/_autosave-*
+hardware/**/~*.lck
+hardware/**/*.dsn
+hardware/**/*.ses
+hardware/**/freerouting.log
+mechanical/*.stl.tmp
+.DS_Store
+hardware/**/route.out
+hardware/**/*.ses.log
+hardware/gen/logs/

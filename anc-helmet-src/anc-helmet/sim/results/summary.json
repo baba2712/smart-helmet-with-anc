@@ -1,0 +1,61 @@
+{
+  "fs": 32000,
+  "ambient_dba": 100.0,
+  "params": {
+    "l_ff": 128,
+    "l_fb": 64,
+    "l_s": 64,
+    "l_f": 128,
+    "w_hp_hz": 300.0,
+    "w_floor_db": -20.0,
+    "ref_hp_hz": 30.0,
+    "clip_trip": 0.05,
+    "mu_ff": 0.001,
+    "mu_fb": 0.0005,
+    "leak": 1e-05,
+    "eps": 1e-06,
+    "y_max": 10.0,
+    "wd_ratio_db": 6.0,
+    "wd_hold_ms": 200,
+    "use_ff": true,
+    "use_fb": true
+  },
+  "s_group_delay_samples": 9.001120568113448,
+  "cases": [
+    {
+      "kind": "motor",
+      "open_dba": 99.90556039611073,
+      "passive_dba": 80.53490661738147,
+      "anc_dba": 72.11906026196294,
+      "open_dbz": 108.92389660199723,
+      "passive_dbz": 100.45443362202944,
+      "anc_dbz": 98.33305313879819,
+      "trips": 0,
+      "y_rms": 3.084284554932587
+    },
+    {
+      "kind": "compressor",
+      "open_dba": 99.87351496958468,
+      "passive_dba": 77.00063818135928,
+      "anc_dba": 73.9922108639796,
+      "open_dbz": 108.64057873895185,
+      "passive_dbz": 103.0098317008209,
+      "anc_dbz": 104.18183975625097,
+      "trips": 0,
+      "y_rms": 3.1584227486907364
+    },
+    {
+      "kind": "pink",
+      "open_dba": 99.86573827393181,
+      "passive_dba": 72.34525911444447,
+      "anc_dba": 69.00658774883894,
+      "open_dbz": 103.71424985090962,
+      "passive_dbz": 96.55050797325589,
+      "anc_dbz": 96.98175306347966,
+      "trips": 0,
+      "y_rms": 0.9718608750680321
+    }
+  ],
+  "latency_sweep": [],
+  "robustness": []
+}

@@ -1,0 +1,41 @@
+** Drc report for /home/claude/anc-helmet/hardware/satellite-board/satellite-board.kicad_pcb **
+** Created on 2026-09-25 10:12:30 **
+
+** Found 9 DRC violations **
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(107.3388 mm, 98.6373 mm): Line on F.Silkscreen
+    @(107.3800 mm, 98.5000 mm): Reference 'J4'
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(107.3800 mm, 89.5000 mm): Reference 'J3'
+    @(107.3388 mm, 89.6373 mm): Line on F.Silkscreen
+[silk_overlap]: Silkscreen overlap
+    Rule: board setup constraints silk; Severity: warning
+    @(125.5000 mm, 95.1000 mm): Reference 'U1'
+    @(124.6892 mm, 94.9689 mm): Line on F.Silkscreen
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(125.5000 mm, 95.1000 mm): Reference 'U1'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(107.3800 mm, 98.5000 mm): Reference 'J4'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(107.3800 mm, 89.5000 mm): Reference 'J3'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(111.0500 mm, 89.0000 mm): Reference 'U2'
+[silk_over_copper]: Silkscreen clipped by solder mask
+    Local override; Severity: warning
+    @(130.0000 mm, 98.8000 mm): Reference 'H2'
+[silk_edge_clearance]: Silkscreen clipped by board edge
+    Rule: board setup constraints silk; Severity: warning
+    @(105.0000 mm, 80.0000 mm): Line on Edge.Cuts
+    @(109.5000 mm, 80.3000 mm): Reference 'H1'
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

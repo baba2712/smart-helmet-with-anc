@@ -1,0 +1,6 @@
+(version 1)
+# IM73A135 (Infineon PG-LLGA-5-2) datasheet land pattern: the sound-port hole sits
+# 0.18 mm inside the GND sealing ring. Intentional - the ring seals the acoustic port.
+(rule "MEMS sound port inside its sealing ring"
+  (constraint hole_clearance (min 0.15mm))
+  (condition "A.Type == 'Pad' && A.Pad_Type == 'NPTH, mechanical' && A.intersectsCourtyard('MK*')"))

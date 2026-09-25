@@ -80,8 +80,8 @@ Tuned values live in one place, `sim/run_all.py::TUNED`. They are exported to
 | --- | --- | --- |
 | Divergence watchdog | Error power > 6 dB above the disturbance estimate for 200 ms | Filters reset to zero |
 | Clip watchdog | > 5 % of output samples clipped over 100 ms | Filters reset to zero |
-| Ear overload | \|p\| at the error mic > 118 dB peak for 50 ms | Forced passive + red LED |
-| Output ceiling | Always | Anti-noise clamp; hear-through hard-limited to 82 dB SPL |
+| Ear overload | \|p\| at the error mic > 118 dB (sine peak), capped at 90 % of the channel's full scale (~14 Pa), for 50 ms | Forced passive + red LED |
+| Output ceiling | Always | Anti-noise clamp at the lower of the DAC range and the amp's 0.9 V swing at the selected gain; hear-through hard-limited to 82 dB SPL |
 | Mode changes | Always | 50 ms fades (no clicks) |
 | No calibration | `paths_valid == 0` | ANC refuses to run; passive + magenta LED |
 | Fit check failure at power-on | Model change > 6 dB or poor fit | Keeps the stored model; amber LED |

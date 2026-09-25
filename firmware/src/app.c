@@ -55,6 +55,10 @@ static void compute_scales(void)
     k_in[3] = v_per_code / (GAIN_ERR * MIC_SENS_V_PER_PA) * g_cal.mic_gain[3];
     dac_per_unit = (4096.0f / VREF_V) / OUT_PA_PER_V;
     ovl_pk = 1.4142f * 20e-6f * powf(10.0f, EAR_OVERLOAD_DB / 20.0f);
+    /* the in-cup channel saturates at ~16 Pa (SPICE): a threshold above full scale
+     * could never trip, so cap it at 90 % of the smaller error channel's full scale */
+    const float err_fs = (ADC_FULL_SCALE / 2.0f) * fminf(k_in[1], k_in[3]);
+    if (ovl_pk > 0.9f * err_fs) ovl_pk = 0.9f * err_fs;
 }
 
 void app_apply_params(void)
@@ -63,9 +67,15 @@ void app_apply_params(void)
     anc_default_params(&p);
     p.mu_ff = g_cal.mu_ff;
     p.mu_fb = g_cal.mu_fb;
-    /* never ask for more than the DAC can give */
+    /* never ask for more than the DAC can give ... */
     const float y_dac_max = 0.95f * (DAC_MID - 1.0f) / dac_per_unit;
     if (p.y_max > y_dac_max) p.y_max = y_dac_max;
+    /* ... or than the amp can swing at the selected gain: otherwise the amp clips
+     * first and the controller's clip detector never sees it */
+    static const float amp_gain_lin[4] = { 0.5012f, 1.0f, 1.4125f, 1.9953f };   /* -6, 0, +3, +6 dB */
+    const float v_dac_per_unit = dac_per_unit * VREF_V / 4096.0f;
+    const float y_amp_max = 0.95f * AMP_OUT_VPK / (amp_gain_lin[g_cal.amp_gain & 3u] * v_dac_per_unit);
+    if (p.y_max > y_amp_max) p.y_max = y_amp_max;
     for (int e = 0; e < 2; e++) {
         g_anc[e].p.mu_ff = p.mu_ff;
         g_anc[e].p.mu_fb = p.mu_fb;

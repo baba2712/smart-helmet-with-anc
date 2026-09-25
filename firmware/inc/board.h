@@ -35,6 +35,9 @@
  * the real value. [CAL] */
 #define OUT_PA_PER_V         8.0f
 #define AMP_GAIN_DEFAULT     1u           /* TPA6132A2 G1:G0 -> 0=-6 dB 1=0 dB 2=+3 dB 3=+6 dB */
+/* TPA6132A2 output swing, V peak (25 mW into 16 R). At 0 dB and above the amp clips
+ * before the DAC does - see hardware/spice/results/spice_results.md */
+#define AMP_OUT_VPK          0.9f
 
 /* battery: VBAT -> 100k/100k -> ADC3 */
 #define VBAT_DIV             2.0f
@@ -43,6 +46,7 @@
 
 /* safety */
 #define HT_LIMIT_DB_SPL      82.0f        /* hear-through can never exceed this at the ear */
-#define EAR_OVERLOAD_DB      118.0f       /* sustained unweighted peak at the error mic -> passive */
+#define EAR_OVERLOAD_DB      118.0f       /* sustained unweighted peak at the error mic -> passive
+                                             (capped below the channel's full scale in app.c) */
 
 #endif

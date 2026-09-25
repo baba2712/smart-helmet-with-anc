@@ -17,6 +17,29 @@ module outline(t, shrink = 0) {
 }
 
 // ---------------- rear tray: battery pocket + board standoffs ----------------
+boss_gap = 0.5;            // air between the battery top and the underside of a board boss
+standoff_d = 5.5;
+pillar_x_max = 19.5;       // pillars move toward the centre, where the elliptical cup has room
+
+// pillar centre for a board hole: just outside the battery fence (in y), and no further out
+// in x than pillar_x_max so the pillar stays inside the cup
+function pillar_xy(h) = let (x = h[0] - main_w / 2, y = main_h / 2 - h[1])
+    [sign(x) * min(abs(x), pillar_x_max), sign(y) * (batt[1] / 2 + 1.2 + standoff_d / 2)];
+
+module standoff(h) {
+    x = h[0] - main_w / 2;
+    y = main_h / 2 - h[1];
+    p = pillar_xy(h);
+    z_boss = tray_t + batt[2] + boss_gap;       // boss underside, just above the battery
+    z_top  = tray_t + batt[2] + standoff_h;     // board underside (unchanged)
+    reach  = norm([p[0] - x, p[1] - y]);        // horizontal pillar-to-boss distance
+    translate([p[0], p[1], 0]) cylinder(d = standoff_d, h = z_top);
+    // lug: 45-degree underside from the pillar up to the boss, so it prints without support
+    hull() {
+        translate([p[0], p[1], z_boss - reach]) cylinder(d = standoff_d, h = z_top - z_boss + reach);
+        translate([x, y, z_boss]) cylinder(d = standoff_d, h = z_top - z_boss);
+    }
+}
 module rear_tray() {
     difference() {
         union() {
@@ -30,13 +53,17 @@ module rear_tray() {
                     translate([1.2, 1.2, tray_t]) cube([batt[0], batt[1], batt[2] + 1]);
                     translate([batt[0] / 2 - 6, -1, tray_t + 3]) cube([12, 5, batt[2]]);   // lead exit
                 }
-            // standoffs for the main board, above the battery
-            for (h = main_holes)
-                translate([h[0] - main_w / 2, main_h / 2 - h[1], 0])
-                    cylinder(d = 5.5, h = tray_t + batt[2] + standoff_h);
+            // main-board standoffs: the board's holes sit over the battery's corners, so each
+            // standoff is a pillar just outside the battery fence plus a lug bridging over the
+            // battery to a boss under the hole (checked by check_fit.py)
+            difference() {
+                for (h = main_holes) standoff(h);
+                translate([-batt[0] / 2 - 0.2, -batt[1] / 2 - 0.2, tray_t])
+                    cube([batt[0] + 0.4, batt[1] + 0.4, batt[2] + boss_gap]);
+            }
         }
         for (h = main_holes)
-            translate([h[0] - main_w / 2, main_h / 2 - h[1], tray_t + 1])
+            translate([h[0] - main_w / 2, main_h / 2 - h[1], tray_t + batt[2] + boss_gap + 0.6])
                 cylinder(d = m2_insert_d, h = 40);
         // cable pass-throughs to the outside mic and the right cup (headband cable)
         translate([-cup_a / 2 + 6, 0, -1]) cylinder(d = 5, h = 10);

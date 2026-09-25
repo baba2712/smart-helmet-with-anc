@@ -59,6 +59,12 @@ def read_params(path):
     return out
 
 
+def read_scad_numbers(path):
+    """Top-level 'name = number;' lines of a .scad file (module bodies included - names are unique)."""
+    return {m.group(1): float(m.group(2))
+            for m in re.finditer(r"^\s*(\w+)\s*=\s*(-?[\d.]+)\s*;", open(path).read(), re.M)}
+
+
 def tokenize(s):
     return re.findall(r'\(|\)|"(?:[^"\\]|\\.)*"|[^\s()]+', s)
 
@@ -203,17 +209,31 @@ def main():
     check(c >= 0, f"battery fence {fw:.1f} x {fh:.1f}: {c:.2f} mm inside the tray rim")
     c = min(A, B) / 2 - (P["driver_d"] + 4) / 2
     check(c >= 2.0, f"driver boss d{P['driver_d'] + 4:.1f}: {c:.2f} mm of baffle around it")
-    # main-board standoffs (d5.5, cup_insert_left.scad) run from the tray floor up past
-    # the battery: they must stay on the tray and out of the battery pocket
-    sr = 5.5 / 2
+    # main-board standoffs (cup_insert_left.scad): the board holes sit over the battery's
+    # corners, so each is a pillar outside the battery fence (floor to board) plus a lug
+    # bridging over the battery to a boss under the hole
+    L_ = read_scad_numbers(os.path.join(HERE, "cup_insert_left.scad"))
+    sd, gap_z = L_["standoff_d"], L_["boss_gap"]
+    sr = sd / 2
     for (hx, hy) in P["main_holes"]:
         x, y = hx - P["main_w"] / 2, P["main_h"] / 2 - hy
-        ring = [(x + sr * math.cos(t / 16 * math.pi), y + sr * math.sin(t / 16 * math.pi)) for t in range(32)]
-        check(ellipse_clearance(ring, A, B) >= 0, f"main standoff at ({hx}, {hy}) on the tray")
-        # signed distance from the standoff's edge to the battery pocket (negative = overlap)
-        dx, dy = abs(x) - bw / 2, abs(y) - bh / 2
+        px = math.copysign(min(abs(x), L_["pillar_x_max"]), x)           # pillar_xy() in the .scad
+        py = math.copysign(bh / 2 + FENCE_WALL + sr, y)
+        reach = math.hypot(px - x, py - y)
+        ring = [(px + sr * math.cos(t / 16 * math.pi), py + sr * math.sin(t / 16 * math.pi)) for t in range(32)]
+        check(ellipse_clearance(ring, A, B) >= 0, f"standoff pillar under ({hx}, {hy}) on the tray, inside the cup")
+        # pillar edge to the battery pocket (negative = overlap)
+        dx, dy = abs(px) - bw / 2, abs(py) - bh / 2
         gap = (math.hypot(max(dx, 0), max(dy, 0)) if max(dx, dy) > 0 else max(dx, dy)) - sr
-        check(gap >= 0, f"main standoff at ({hx}, {hy}): {gap:.2f} mm from the {bw} x {bh} battery pocket")
+        check(gap >= 0, f"standoff pillar under ({hx}, {hy}): {gap:.2f} mm clear of the {bw} x {bh} battery pocket")
+        # the boss over the battery starts above it; the insert needs its depth
+        boss_h = P["standoff_h"] - gap_z
+        check(gap_z > 0 and boss_h >= 3.0, f"boss under ({hx}, {hy}): {gap_z} mm above the battery, "
+              f"{boss_h:.1f} mm tall for the M2 heat-set insert")
+        # 45-degree lug underside: horizontal reach = drop, so it prints without supports
+        z_boss = LEFT_TRAY_T + P["batt"][2] + gap_z
+        check(z_boss - reach >= LEFT_TRAY_T, f"lug reach {reach:.2f} mm: 45-degree underside starts "
+              f"{z_boss - reach:.1f} mm up the pillar (printable without supports)")
 
     print("\nleft-cup depth")
     stack = [("tray", LEFT_TRAY_T), ("battery", P["batt"][2]), ("standoff", P["standoff_h"]),

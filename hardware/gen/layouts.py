@@ -15,7 +15,7 @@ LAYOUTS = {
     "main-board": {
         # 14 mm corners: the board has to sit inside an elliptical earcup (72 x 62 mm
         # inside, see mechanical/params.scad) - a 6 mm-corner rectangle doesn't fit.
-        "size": (60.0, 50.0), "corner": 14.0, "layers": 4,
+        "size": (60.0, 50.0), "corner": 14.0, "layers": 4, "refs_on_fab": True,   # dense: refs on F.Fab, not silk
         "anchors": {
             # ref: (x, y, rot, side)
             "U5": (30.0, 25.0, 0, "F"),        # STM32H743 LQFP-100

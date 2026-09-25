@@ -69,6 +69,19 @@ DRU = """(version 1)
 (rule "MEMS sound port inside its sealing ring"
   (constraint hole_clearance (min 0.15mm))
   (condition "A.Type == 'Pad' && A.Pad_Type == 'NPTH, mechanical' && A.intersectsCourtyard('MK*')"))
+
+# Exposed-pad thermal vias and plated mounting holes are never hand-soldered: join them to the
+# GND pours solid, for heat (TPA6132A2 / TPS63001 exposed pads) and a low-impedance chassis tie.
+(rule "GND through-holes solid to the pour"
+  (constraint zone_connection solid)
+  (condition "A.Type == 'Pad' && A.Pad_Type == 'Through-hole' && A.NetName == 'GND'"))
+
+# On this dense board some small SMD GND pads get one thermal spoke instead of two. One
+# 0.3 mm spoke carries far more than these pads' current, and every such pad also has its
+# own via or track to the inner GND plane (checked: 0 unconnected).
+(rule "one thermal spoke is enough for small GND pads"
+  (constraint min_resolved_spokes 1)
+  (condition "A.Type == 'Pad' && A.NetName == 'GND'"))
 """
 
 
@@ -507,7 +520,7 @@ def write_project(path, board_layers):
     patterns += [{"netclass": "Audio", "pattern": f"{p}*"} for p in AUDIO_PREFIX]
     pro = {
         "board": {"design_settings": {"rules": {
-            "min_clearance": 0.15, "min_track_width": 0.127, "min_via_diameter": 0.5, "min_via_annular_width": 0.1,
+            "min_clearance": 0.15, "min_track_width": 0.127, "min_via_diameter": 0.45, "min_via_annular_width": 0.1,
             "min_through_hole_diameter": 0.2, "min_hole_to_hole": 0.25, "min_hole_clearance": 0.25,
             "min_copper_edge_clearance": 0.3, "min_silk_clearance": 0.0, "min_microvia_diameter": 0.2,
             "min_microvia_drill": 0.1, "max_error": 0.005, "solder_mask_to_copper_clearance": 0.0,
@@ -565,7 +578,7 @@ def stage_place(name):
     tb.SetTitle(circ.title); tb.SetRevision("A"); tb.SetCompany("Open ANC Helmet")
     bds = board.GetDesignSettings()
     bds.m_TrackMinWidth = MM(0.127)
-    bds.m_ViasMinSize = MM(0.5)
+    bds.m_ViasMinSize = MM(0.45)             # finisher fan-out vias 0.45/0.2 (JLCPCB 4-layer standard)
     bds.m_MinThroughDrill = MM(0.2)          # TI QFN/WQFN thermal-pad vias (JLCPCB 4-layer: 0.15 mm min)
     bds.m_CopperEdgeClearance = MM(0.3)
     bds.m_HoleClearance = MM(0.25)
@@ -768,6 +781,8 @@ def stage_tie(name):
     board = pcbnew.LoadBoard(pcb_path)
     board.GetConnectivity().RecalculateRatsnest()      # same SWIG warm-up as stage_finish
     list(board.Tracks())
+    board.GetDesignSettings().m_ViasMinSize = MM(0.45)
+    pcbnew.ZONE_FILLER(board).Fill(board.Zones())      # tracks may have been added since the last fill
     for _ in range(3):
         tied, small = tie_gnd_islands(board)
         print(f"  {tied} GND islands tied to the plane" + (f", {small} too small for a via" if small else ""))

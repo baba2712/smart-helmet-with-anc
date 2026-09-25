@@ -36,7 +36,9 @@ MM = pcbnew.FromMM
 NETCLASSES = {
     # name: (track, clearance, via_dia, via_drill)
     "Default": (0.15, 0.15, 0.6, 0.3),
-    "Power":   (0.40, 0.18, 0.7, 0.35),
+    # 0.30 mm: must reach 0.5 mm-pitch pads (LQFP-100, WQFN, QFN, USB-C) at 0.18 mm clearance;
+    # ~1 A on 1 oz outer copper, above the 500 mA charger / buck-boost input
+    "Power":   (0.30, 0.18, 0.7, 0.35),
     "Audio":   (0.20, 0.18, 0.6, 0.3),
 }
 POWER_PATTERNS = ["VBUS", "VBUS_F", "VSYS", "VBAT", "3V3", "3V3_LDO", "3V3_AMP", "2V8A", "SW_L1", "SW_L2",
@@ -249,6 +251,144 @@ def stitch_gnd(board, w, h, corner, pitch=2.5, via=0.6, drill=0.3, clear=0.3):
             x += pitch
         y += pitch
     return len(added)
+
+
+FAN_VIA = (0.5, 0.25, 0.2)     # fan-out via: diameter, drill, clearance (JLCPCB 4-layer standard)
+FAN_TRACK = 0.25
+
+
+def tie_gnd_islands(board, via=0.6, drill=0.3, clear=0.25, step=0.2):
+    """Give every outer-layer GND pour island that has no via (or GND through-hole) one via
+    down to the inner GND plane. The via must clear other-net copper on EVERY layer and
+    stay off all pads (no via-in-pad). Returns (islands tied, islands too small)."""
+    gnd = board.FindNet("GND")
+    gc = gnd.GetNetCode()
+    R = via / 2 + clear
+    anchors, segs, obst, obst_other, gnd_pads = [], [], [], [], []
+    for t in board.GetTracks():
+        if t.Type() == pcbnew.PCB_VIA_T:
+            if t.GetNetCode() == gc:
+                anchors.append(t.GetPosition())
+            else:
+                c = t.GetPosition()
+                segs.append((pcbnew.ToMM(c.x), pcbnew.ToMM(c.y), pcbnew.ToMM(c.x), pcbnew.ToMM(c.y),
+                             pcbnew.ToMM(t.GetWidth()) / 2))
+        elif t.GetNetCode() != gc:
+            a, b = t.GetStart(), t.GetEnd()
+            segs.append((pcbnew.ToMM(a.x), pcbnew.ToMM(a.y), pcbnew.ToMM(b.x), pcbnew.ToMM(b.y),
+                         pcbnew.ToMM(t.GetWidth()) / 2))
+    for fp in board.GetFootprints():
+        for p in fp.Pads():
+            if p.GetNetCode() == gc and p.GetAttribute() == pcbnew.PAD_ATTRIB_PTH:
+                anchors.append(p.GetPosition())
+            bb = p.GetBoundingBox()
+            box = (pcbnew.ToMM(bb.GetLeft()), pcbnew.ToMM(bb.GetTop()),
+                   pcbnew.ToMM(bb.GetRight()), pcbnew.ToMM(bb.GetBottom()))
+            obst.append(box)
+            if p.GetNetCode() != gc:
+                obst_other.append(box)
+            elif p.GetAttribute() == pcbnew.PAD_ATTRIB_SMD:
+                gnd_pads.append(p)
+
+    def seg_d(px, py, sg):
+        x1, y1, x2, y2, _ = sg
+        dx, dy = x2 - x1, y2 - y1
+        L = dx * dx + dy * dy
+        u = 0 if L == 0 else max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / L))
+        return math.hypot(px - (x1 + u * dx), py - (y1 + u * dy))
+
+    ring = [(math.cos(k * math.pi / 4), math.sin(k * math.pi / 4)) for k in range(8)]
+
+    def fanout(isl, layer):
+        """A GND pad in this island, a short track out of it and a small via where both clear
+        other-net copper. Returns (pad, (x, y), via_dia, drill) or None."""
+        fv, fd, fc = FAN_VIA
+        rv = fv / 2 + fc
+        for pad in gnd_pads:
+            if not pad.IsOnLayer(layer) or not isl.Contains(pad.GetPosition()):
+                continue
+            pc = pad.GetPosition()
+            px, py = pcbnew.ToMM(pc.x), pcbnew.ToMM(pc.y)
+            pb = pad.GetBoundingBox()
+            half = max(pcbnew.ToMM(pb.GetWidth()), pcbnew.ToMM(pb.GetHeight())) / 2
+            for dist in (half + rv + 0.05, half + rv + 0.3, half + rv + 0.6, half + rv + 1.0):
+                for k in range(16):
+                    ang = k * math.pi / 8
+                    vx, vy = px + dist * math.cos(ang), py + dist * math.sin(ang)
+                    if any(b[0] - rv < vx < b[2] + rv and b[1] - rv < vy < b[3] + rv for b in obst):
+                        continue
+                    if any(seg_d(vx, vy, sg) <= sg[4] + rv for sg in segs):
+                        continue
+                    # the track: sample it against other-net copper (any layer - conservative)
+                    ok = True
+                    for j in range(1, 21):
+                        tx, ty = px + (vx - px) * j / 20, py + (vy - py) * j / 20
+                        m = FAN_TRACK / 2 + fc
+                        if any(b[0] - m < tx < b[2] + m and b[1] - m < ty < b[3] + m for b in obst_other) or \
+                           any(seg_d(tx, ty, sg) <= sg[4] + m for sg in segs):
+                            ok = False
+                            break
+                    if ok:
+                        return pad, (vx, vy), fv, fd
+        return None
+
+    tied = small = 0
+    for z in list(board.Zones()):
+        if z.GetIsRuleArea() or z.GetNetCode() != gc or z.GetLayer() not in (pcbnew.F_Cu, pcbnew.B_Cu):
+            continue
+        polys = z.GetFilledPolysList(z.GetLayer())
+        for i in range(polys.OutlineCount()):
+            isl = pcbnew.SHAPE_POLY_SET()
+            isl.AddOutline(polys.Outline(i))
+            for hk in range(polys.HoleCount(i)):
+                isl.AddHole(polys.Hole(i, hk))
+            if any(isl.Contains(a) for a in anchors):
+                continue
+            bb = isl.BBox()
+            x0, y0 = pcbnew.ToMM(bb.GetLeft()), pcbnew.ToMM(bb.GetTop())
+            x1, y1 = pcbnew.ToMM(bb.GetRight()), pcbnew.ToMM(bb.GetBottom())
+            best = None
+            y = y0
+            while y <= y1 and best is None:
+                x = x0
+                while x <= x1:
+                    rr = via / 2 + 0.05
+                    ok = isl.Contains(pcbnew.VECTOR2I(MM(x), MM(y))) and all(
+                        isl.Contains(pcbnew.VECTOR2I(MM(x + rr * cx), MM(y + rr * cy))) for cx, cy in ring)
+                    ok = ok and all(not (b[0] - R < x < b[2] + R and b[1] - R < y < b[3] + R) for b in obst)
+                    ok = ok and all(seg_d(x, y, sg) > sg[4] + R for sg in segs)
+                    if ok:
+                        best = (x, y)
+                        break
+                    x += step
+                y += step
+            fan = None
+            if best is None:
+                fan = fanout(isl, z.GetLayer())
+                if fan is None:
+                    small += 1
+                    continue
+                best = fan[1]
+            v = pcbnew.PCB_VIA(board)
+            v.SetPosition(pcbnew.VECTOR2I(MM(best[0]), MM(best[1])))
+            v.SetViaType(pcbnew.VIATYPE_THROUGH)
+            v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
+            v.SetWidth(MM(via)); v.SetDrill(MM(drill))
+            v.SetNet(gnd)
+            board.Add(v)
+            if fan is not None:                       # short track pad -> via
+                pad, (vx, vy), fv, fd = fan
+                v.SetWidth(MM(fv)); v.SetDrill(MM(fd))
+                t = pcbnew.PCB_TRACK(board)
+                t.SetStart(pad.GetPosition()); t.SetEnd(pcbnew.VECTOR2I(MM(vx), MM(vy)))
+                t.SetWidth(MM(FAN_TRACK)); t.SetLayer(z.GetLayer()); t.SetNet(gnd)
+                board.Add(t)
+                pc = pad.GetPosition()
+                segs.append((pcbnew.ToMM(pc.x), pcbnew.ToMM(pc.y), vx, vy, FAN_TRACK / 2))
+            anchors.append(v.GetPosition())
+            segs.append((best[0], best[1], best[0], best[1], via / 2))
+            tied += 1
+    return tied, small
 
 
 # ------------------------------------------------------------------------------ placement
@@ -499,8 +639,9 @@ def import_ses(board, path):
     netout = [e for e in routes if isinstance(e, list) and e[0] == "network_out"]
     layers = {board.GetLayerName(l): l for l in range(pcbnew.PCB_LAYER_ID_COUNT)}
     n_w = n_v = 0
-    # remove any previous routing
-    for t in list(board.GetTracks()):
+    # remove any previous routing (Tracks(), not GetTracks(): the latter trips a KiCad 7
+    # SWIG wrapper bug on boards loaded after a finish)
+    for t in list(board.Tracks()):
         board.Remove(t)
     for no in netout:
         for net in no[1:]:
@@ -605,12 +746,70 @@ def stage_finish(name):
         if L not in have:
             add_zone(board, gnd, L, w, h, full=lay.get("zone_full", False))
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+    # outer-layer GND islands the stitching grid missed: one via each down to the plane
+    for _ in range(3):
+        tied, small = tie_gnd_islands(board)
+        print(f"  {tied} GND islands tied to the plane" + (f", {small} too small for a via" if small else ""))
+        if not tied:
+            break
+        pcbnew.ZONE_FILLER(board).Fill(board.Zones())
     pcbnew.SaveBoard(pcb_path, board)
     board = pcbnew.LoadBoard(pcb_path)
     n_unr = unrouted(board)
     rpt = os.path.join(d, "fab", f"{name}-drc.rpt")
     pcbnew.WriteDRCReport(board, rpt, pcbnew.EDA_UNITS_MILLIMETRES, True)
     return board, n_unr, rpt
+
+
+def stage_tie(name):
+    """Re-run only the GND-island tie + refill + DRC on an already finished board."""
+    d = os.path.join(HW, name)
+    pcb_path = os.path.join(d, f"{name}.kicad_pcb")
+    board = pcbnew.LoadBoard(pcb_path)
+    board.GetConnectivity().RecalculateRatsnest()      # same SWIG warm-up as stage_finish
+    list(board.Tracks())
+    for _ in range(3):
+        tied, small = tie_gnd_islands(board)
+        print(f"  {tied} GND islands tied to the plane" + (f", {small} too small for a via" if small else ""))
+        if not tied:
+            break
+        pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+    pcbnew.SaveBoard(pcb_path, board)
+    board = pcbnew.LoadBoard(pcb_path)
+    n_unr = unrouted(board)
+    rpt = os.path.join(d, "fab", f"{name}-drc.rpt")
+    pcbnew.WriteDRCReport(board, rpt, pcbnew.EDA_UNITS_MILLIMETRES, True)
+    return n_unr, rpt
+
+
+def stage_complete(name, passes=30):
+    """One more autorouter round on a finished board (its ground vias and pours included),
+    then GND islands, refill, DRC. Keeps the current routing if the router adds nothing."""
+    d = os.path.join(HW, name)
+    pcb_path = os.path.join(d, f"{name}.kicad_pcb")
+    board = pcbnew.LoadBoard(pcb_path)
+    board.GetConnectivity().RecalculateRatsnest()
+    list(board.Tracks())
+    before = unrouted(board)
+    pcbnew.ExportSpecctraDSN(board, os.path.join(d, f"{name}.dsn"))
+    if stage_route(name, passes):
+        backup = pcb_path + ".bak"
+        pcbnew.SaveBoard(backup, board)
+        nw, nv = import_ses(board, os.path.join(d, f"{name}.ses"))
+        pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+        after = unrouted(board)
+        print(f"  completion: {before} -> {after} unrouted ({nw} segments, {nv} vias)")
+        if after > before:
+            board = pcbnew.LoadBoard(backup)
+            list(board.Tracks())
+            print("  worse - kept the previous routing")
+        os.remove(backup)
+    pcbnew.SaveBoard(pcb_path, board)
+    # the SES import leaves KiCad 7's SWIG wrappers in a bad state: tie + DRC in a fresh process
+    r = subprocess.run([sys.executable, os.path.abspath(__file__), "tie", name], capture_output=True, text=True)
+    print(r.stdout.strip())
+    rpt = os.path.join(d, "fab", f"{name}-drc.rpt")
+    return int(r.stdout.split("unrouted connections:")[1].split()[0]), rpt
 
 
 def stage_fab(name):
@@ -688,6 +887,12 @@ if __name__ == "__main__":
         print("routed:", stage_route(name, int(sys.argv[3]) if len(sys.argv) > 3 else 40))
     elif stage == "finish":
         b, n, rpt = stage_finish(name)
+        print("unrouted connections:", n, "report:", rpt)
+    elif stage == "complete":
+        n, rpt = stage_complete(name)
+        print("unrouted connections:", n, "report:", rpt)
+    elif stage == "tie":
+        n, rpt = stage_tie(name)
         print("unrouted connections:", n, "report:", rpt)
     elif stage == "fab":
         stage_fab(name)

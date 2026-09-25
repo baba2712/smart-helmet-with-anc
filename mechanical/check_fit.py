@@ -112,6 +112,24 @@ def footprints(pcb):
     return res
 
 
+def placements(pcb):
+    """ref -> (x, y, rot, side) as placed in the .kicad_pcb."""
+    out = {}
+    for fp in kids(pcb, "footprint"):
+        at = kids(fp, "at")[0]
+        ref = next((p[2] for p in kids(fp, "property") + kids(fp, "fp_text") if p[1] in ("Reference", "reference")), None)
+        side = "B" if kids(fp, "layer")[0][1] == "B.Cu" else "F"
+        out[ref] = (float(at[1]) - OX, float(at[2]) - OY, float(at[3]) if len(at) > 3 else 0.0, side)
+    return out
+
+
+def rot_matches(want, side, got):
+    """layouts.py gives the rotation as seen from the part's own side; KiCad stores a
+    flipped (B.Cu) footprint's orientation mirrored, so 90 on B reads -90."""
+    w = -want if side == "B" else want
+    return abs(((got - w) + 180.0) % 360.0 - 180.0) < 0.1
+
+
 def pad_abs(fp, px, py):
     x, y, rot, _ = fp
     a = math.radians(rot)                        # KiCad: CCW rotation, y down
@@ -179,6 +197,20 @@ def main():
             lx, ly = lay["anchors"][ref][:2]
             check(math.hypot(px - hx, py - hy) < TOL and math.hypot(lx - hx, ly - hy) < TOL,
                   f"{name}: {ref} at ({px:.2f}, {py:.2f}) matches params ({hx}, {hy})")
+
+    # every hand-placed anchor (ICs, connectors, UI parts, holes): position, rotation, side
+    for name in ("main-board", "satellite-board", "mic-board"):
+        placed = placements(pcbs[name])
+        bad = []
+        for ref, (ax, ay, arot, aside) in LAYOUTS[name]["anchors"].items():
+            if ref not in placed:
+                bad.append(f"{ref} missing")
+                continue
+            px, py, prot, pside = placed[ref]
+            if math.hypot(px - ax, py - ay) > TOL or pside != aside or not rot_matches(arot, aside, prot):
+                bad.append(f"{ref}: layout ({ax}, {ay}) {arot} deg {aside}, board ({px:.2f}, {py:.2f}) {prot:g} deg {pside}")
+        check(not bad, f"{name}: all {len(LAYOUTS[name]['anchors'])} anchors match layouts.py "
+              "(position, rotation, side)" + ("" if not bad else " - " + "; ".join(bad)))
 
     # mic board: size + sound port (the NPTH pad of MK1) against the pod's hole
     mic = pcbs["mic-board"]

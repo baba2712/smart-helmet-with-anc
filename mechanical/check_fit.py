@@ -149,6 +149,20 @@ def outline_bbox(pcb):
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def outline_arc_radii(pcb):
+    """Radius of every Edge.Cuts arc (circle through its start, mid and end points)."""
+    radii = []
+    for g in kids(pcb, "gr_arc"):
+        if kids(g, "layer")[0][1] != "Edge.Cuts":
+            continue
+        (ax, ay), (bx, by), (cx, cy) = [(float(kids(g, k)[0][1]), float(kids(g, k)[0][2])) for k in ("start", "mid", "end")]
+        d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+        ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d
+        uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d
+        radii.append(math.hypot(ax - ux, ay - uy))
+    return radii
+
+
 # ------------------------------------------------------------------ geometry
 def rounded_rect_points(w, h, r, n=90):
     """Perimeter of a w x h rounded rectangle centred on the origin."""
@@ -197,6 +211,13 @@ def main():
             lx, ly = lay["anchors"][ref][:2]
             check(math.hypot(px - hx, py - hy) < TOL and math.hypot(lx - hx, ly - hy) < TOL,
                   f"{name}: {ref} at ({px:.2f}, {py:.2f}) matches params ({hx}, {hy})")
+
+    # Edge.Cuts corners: four arcs of the layout's corner radius (a bounding box alone can't see it)
+    for name in ("main-board", "satellite-board", "mic-board"):
+        want = LAYOUTS[name]["corner"]
+        radii = outline_arc_radii(pcbs[name])
+        check(len(radii) == 4 and all(abs(r - want) < TOL for r in radii),
+              f"{name}: Edge.Cuts corners r {', '.join(f'{r:.2f}' for r in radii)} = layouts.py r{want}")
 
     # every hand-placed anchor (ICs, connectors, UI parts, holes): position, rotation, side
     for name in ("main-board", "satellite-board", "mic-board"):
